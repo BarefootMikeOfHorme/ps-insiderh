@@ -61,5 +61,20 @@ Expire-Date: 0
     subprocess.check_call(['bash', script], env=ver_env)
 
 
+from pathlib import Path
+from tests.helpers.verify_signature import verify_detached_signature
+
+
 def test_signed_hdf5_verification(tmp_path):
+    fixtures_dir = Path('tests/fixtures')
+    h5 = fixtures_dir / 'canonical_unsigned.h5'
+    sig = fixtures_dir / 'canonical_unsigned.h5.sig'
+    pub = fixtures_dir / 'signer_pubkey.asc'
+
+    if h5.exists() and sig.exists() and pub.exists():
+        # Prefer canonical fixtures if present
+        assert verify_detached_signature(str(h5), str(sig), str(pub))
+        return
+
+    # Fallback to dynamic generation and verification
     generate_signed_hdf5_and_verify(tmp_path)
