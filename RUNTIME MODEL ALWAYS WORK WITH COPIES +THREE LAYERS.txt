@@ -1,0 +1,78 @@
+============================================================
+OASM RUNTIME MODEL — THREE ACTIVE LAYERS, ALWAYS WITH COPIES
+============================================================
+
+1. IMMUTABLE TEMPLATE LAYER
+------------------------------------------------------------
+- CBOR templates derived from HDF5 program bundles.
+- Defines original, untouched versions of:
+  - modules
+  - crates
+  - command blocks
+  - default configs
+  - schemas and metadata
+
+Rules:
+- never modified
+- only copied
+
+Purpose:
+- provide canonical, reproducible starting points.
+
+------------------------------------------------------------
+
+2. LIVE CBOR HANDLER LAYER (RUNTIME STATE)
+------------------------------------------------------------
+- A working CBOR copy created from an immutable template or prior mutable state.
+- Receives all runtime changes:
+  - program actions
+  - user changes (via UI/editor)
+  - AI/automation updates
+  - YAML-driven edits (after validation)
+
+Responsibilities:
+- enforce schema rules
+- maintain session-specific identifiers
+- integrate JSON lineage checkpoints
+- support revert and replay
+- remain fast, binary, and deterministic
+
+This is the only layer that mutates.
+
+------------------------------------------------------------
+
+3. YAML REFLECTION LAYER (HUMAN INTERFACE)
+------------------------------------------------------------
+- YAML files are generated as reflections of live CBOR state.
+- They are:
+  - human-readable
+  - comment-friendly
+  - grouped and structured
+  - editable
+
+Rules:
+- YAML is not authoritative at runtime.
+- YAML edits are validated and compiled into the live CBOR handler.
+- CBOR remains the runtime truth.
+
+Purpose:
+- support understanding, configuration, and manual adjustment
+  without touching binary runtime structures directly.
+
+============================================================
+ALWAYS WORK WITH COPIES
+============================================================
+The system never edits:
+- immutable HDF5 content
+- immutable CBOR templates
+
+Instead:
+- loads a copy into live CBOR handler
+- applies changes there
+- validates
+- either:
+  - saves as a new mutable instance if valid
+  - reverts and discards if invalid
+
+This prevents corruption and supports lineage and reproducibility.
+============================================================
