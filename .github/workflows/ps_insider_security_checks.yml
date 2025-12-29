@@ -34,6 +34,11 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y gnupg
 
+      - name: Generate canonical fixtures (if missing)
+        run: |
+          chmod +x ./scripts/generate-fixtures.sh || true
+          ./scripts/generate-fixtures.sh || true
+
       - name: Verify OPB/template signatures
         run: |
           chmod +x ./ci/verify_signatures.sh
