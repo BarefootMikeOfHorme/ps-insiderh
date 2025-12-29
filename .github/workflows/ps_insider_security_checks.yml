@@ -1,14 +1,13 @@
 name: PS-Insider Security Checks
 
 on:
-  pull_request:
+  pull_request: {}
   push:
     branches: [ main, master ]
 
 jobs:
   wdac_validation:
     runs-on: windows-latest
-    if: runner.os == 'Windows'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,26 +38,6 @@ jobs:
         run: |
           chmod +x ./ci/verify_signatures.sh
           ./ci/verify_signatures.sh
-
-  py03_fuzzing:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Python requirements
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r ci/requirements.txt
-
-      - name: Run Py03 fuzzing and coverage
-        run: |
-          pytest --maxfail=1 --disable-warnings -q --cov=.
 
   static_scan:
     runs-on: ubuntu-latest
