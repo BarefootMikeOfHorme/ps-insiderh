@@ -1,0 +1,148 @@
+
+============================================================
+OASM RUNTIME MODEL — FULL EXPLANATION
+============================================================
+
+1. ALWAYS WORK WITH COPIES
+------------------------------------------------------------
+The OASM runtime never edits the immutable templates stored in HDF5 or
+the immutable CBOR templates derived from them. Instead, it always: 
+
+- loads into a copy for program u
+- edits the copy
+- validates the copy
+- saves the copy (if valid)
+- discards the copy (if invalid)
+
+This ensures:
+- no corruption
+- no invalid states
+- perfect reproducibility
+
+------------------------------------------------------------
+
+2. THREE ACTIVE RUNTIME LAYERS
+------------------------------------------------------------
+
+A. IMMUTABLE TEMPLATE LAYER
+- Derived from the program’s HDF5 bundle.
+- Contains the original CBOR template for modules, crates, configs.
+- Never modified.
+- Only copied.
+
+B. LIVE CBOR HANDLER LAYER
+- The active runtime state.
+- Receives updates from program actions or YAML edits.
+- Enforces schema rules.
+- Interacts with JSON lineage.
+- Maintains session-specific identifiers.
+- Validates every change.
+
+C. YAML REFLECTION LAYER
+- A human-readable reflection of the live CBOR state.
+- Contains comments, grouping, readable names.
+- Editable by users.
+- Compiled back into CBOR after validation.
+
+------------------------------------------------------------
+
+3. CHANGE EVENTS (PROGRAM OR YAML)
+------------------------------------------------------------
+Whenever a change occurs:
+- user edits YAML
+- program updates runtime state
+- AI agent modifies a parameter
+- automation module triggers a change
+
+The system immediately:
+1. Creates a JSON lineage checkpoint  
+2. Applies the change to the live CBOR handler  
+3. Validates the updated state  
+4. Reflects the change back into YAML (if needed)
+
+------------------------------------------------------------
+
+4. JSON LINEAGE / REVERT CHECKPOINTS
+------------------------------------------------------------
+Each change produces a JSON entry containing:
+- timestamp
+- session ID
+- change type
+- old value
+- new value
+- module or crate ID
+- validation status
+
+This enables:
+- revert to last known good state
+- revert to any chosen save point
+- replay of session history
+- debugging and auditing
+
+------------------------------------------------------------
+
+5. VALIDATION LOOP
+------------------------------------------------------------
+After each change, or periodically, the program runs validation:
+
+- compile checks
+- calculation checks
+- geometry checks
+- schema checks
+- dependency checks
+- safety checks
+
+If validation fails:
+- the change is rejected
+- the system reverts to last known good state
+- the user is notified (if applicable)
+
+------------------------------------------------------------
+
+6. CRASH SAFETY
+------------------------------------------------------------
+If the program crashes:
+- the live CBOR handler is discarded
+- the system loads the last known good checkpoint
+- YAML is regenerated from that checkpoint
+- runtime resumes safely
+
+------------------------------------------------------------
+
+7. SESSION COMPLETION
+------------------------------------------------------------
+When the session ends:
+- the validated live CBOR is saved as a new mutable instance
+- JSON lineage is finalized
+- YAML reflection is updated
+- immutable templates remain untouched
+
+------------------------------------------------------------
+
+8. MUTABLE COPY REUSE
+------------------------------------------------------------
+Future sessions may:
+- load the mutable CBOR copy (continuation)
+- OR load the immutable template (fresh start)
+
+Both paths are supported.
+
+============================================================
+SUMMARY
+============================================================
+The runtime uses three layers:
+1. Immutable CBOR Template  
+2. Live CBOR Handler  
+3. YAML Reflection  
+
+Every change:
+- creates a JSON lineage checkpoint
+- is validated
+- is reversible
+
+The system prevents invalid states, preserves lineage, and ensures
+reproducibility.
+
+
+
+

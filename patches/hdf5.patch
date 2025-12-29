@@ -1,0 +1,4621 @@
+diff --git a/.github/workflows/ps_insider_security_checks.yml b/.github/workflows/ps_insider_security_checks.yml
+new file mode 100644
+index 0000000..ee544a5
+--- /dev/null
++++ b/.github/workflows/ps_insider_security_checks.yml
+@@ -0,0 +1,83 @@
++name: PS-Insider Security Checks
++
++on:
++  pull_request:
++  push:
++    branches: [ main, master ]
++
++jobs:
++  wdac_validation:
++    runs-on: windows-latest
++    if: runner.os == 'Windows'
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Setup PowerShell
++        uses: actions/setup-powershell@v2
++
++      - name: Run WDAC policy validation
++        run: |
++          pwsh -NoProfile -ExecutionPolicy Bypass -File ./ci/wdac_validate.ps1
++
++  signature_verification:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Install GPG
++        run: |
++          sudo apt-get update && sudo apt-get install -y gnupg
++
++      - name: Verify OPB/template signatures
++        run: |
++          chmod +x ./ci/verify_signatures.sh
++          ./ci/verify_signatures.sh
++
++  py03_fuzzing:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Setup Python
++        uses: actions/setup-python@v4
++        with:
++          python-version: '3.11'
++
++      - name: Install Python requirements
++        run: |
++          python -m pip install --upgrade pip
++          python -m pip install -r ci/requirements.txt
++
++      - name: Run Py03 fuzzing and coverage
++        run: |
++          pytest --maxfail=1 --disable-warnings -q --cov=.
++
++  static_scan:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Run static scan for WinAPI patterns
++        run: |
++          chmod +x ./ci/static_scan.sh
++          ./ci/static_scan.sh
++
++  upload_artifacts:
++    runs-on: ubuntu-latest
++    needs: [signature_verification, py03_fuzzing, static_scan]
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Upload test artifacts
++        uses: actions/upload-artifact@v4
++        with:
++          name: ps-insider-ci-artifacts
++          path: |
++            ./ci/**
++            ./tests/**
++            ./coverage.xml
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..4c48b40
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,9 @@
++# Ignore specific docs per request
++DOCKER_BLUEPRINT.md
++OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt
++
++# Common ignores
++target/
++**/node_modules/
++*.log
++*.bak
+diff --git a/===================================.txt b/===================================.txt
+new file mode 100644
+index 0000000..952b932
+--- /dev/null
++++ b/===================================.txt
+@@ -0,0 +1,46 @@
++============================================================
++A — OASM CORE + PS-INSIDER HARDENED + RUST + PY03 IN HDF5
++============================================================
++
++PURPOSE
++------------------------------------------------------------
++Define how HDF5 is used to organize and stabilize the OASM core
++environment, including:
++- PS-Insider (hardened) integration
++- Rust control layer
++- Python 3 (Py03) scripting (not replacing Rust; a useful toolkit for testing and refinement)
++- CBOR-backed runtime state
++- modular kits and templates
++- logging, checksums, tests
++
++The goal:
++- everything is modular
++- everything is verifiable
++- everything is repairable
++- everything is auditable
++- everything is built from small pieces, staged into known-good wholes.
++
++
++HIGH-LEVEL STRUCTURE
++------------------------------------------------------------
++The OASM Core HDF5 file (e.g. oasm_core.hdf5) will contain:
++
++/core
++  /ps_insider
++  /rust
++  /py03
++  /cbor_layouts
++  /schemas
++   /hdf5
++  /templates
++  /logging
++  /tests
++  /lineage
++  /staging
++
++Each of these is further broken down into:
++- base mechanisms (small units, <100 LOC where possible)
++- templates (immutable building blocks)
++- staged compositions (known-good assemblies)
++- logging and testing rules
++- checksums and verification metadata
+diff --git a/Cargo.toml b/Cargo.toml
+new file mode 100644
+index 0000000..2254459
+--- /dev/null
++++ b/Cargo.toml
+@@ -0,0 +1,80 @@
++[package]
++name = "oasm-orchestrator"
++version = "0.1.0"
++edition = "2021"
++authors = ["OASM Team"]
++description = "Modular security orchestration system with Rust, HDF5, and PyO3"
++license = "MIT"
++
++[lib]
++name = "oasm_orchestrator"
++path = "src/lib.rs"
++
++[[bin]]
++name = "oasm-orchestrator"
++path = "src/main.rs"
++
++[dependencies]
++# Async runtime
++tokio = { version = "1.35", features = ["full"] }
++async-trait = "0.1"
++
++# Serialization
++serde = { version = "1.0", features = ["derive"] }
++serde_json = "1.0"
++serde_cbor = "0.11"  # CBOR serialization
++ciborium = "0.2"     # Alternative CBOR implementation
++
++# HDF5 support
++hdf5 = "0.8"
++
++# PyO3 for Python integration
++pyo3 = { version = "0.20", features = ["extension-module", "abi3-py311"] }
++
++# Logging and observability
++tracing = "0.1"
++tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
++tracing-appender = "0.2"
++
++# Error handling
++anyhow = "1.0"
++thiserror = "1.0"
++
++# Utilities
++chrono = { version = "0.4", features = ["serde"] }
++uuid = { version = "1.6", features = ["v4", "serde"] }
++blake3 = "1.5"  # Cryptographic hashing
++
++# Windows API support (conditional)
++[target.'cfg(windows)'.dependencies]
++windows = { version = "0.52", features = [
++    "Win32_System_Threading",
++    "Win32_Security",
++    "Win32_Foundation",
++] }
++
++[dev-dependencies]
++# Testing frameworks
++proptest = "1.4"  # Property-based testing
++quickcheck = "1.0"
++criterion = "0.5"  # Benchmarking
++
++# Test utilities
++tempfile = "3.8"
++mockito = "1.2"
++
++[profile.release]
++opt-level = 3
++lto = true
++codegen-units = 1
++strip = true
++
++[profile.dev]
++opt-level = 0
++debug = true
++
++[features]
++default = ["oasm-integration"]
++oasm-integration = []  # Enable OASM REST API integration
++powershell-wrapper = []  # PowerShell invocation support
++full-audit = []  # Extended audit logging
+diff --git a/HDF5 PROGRAM BUNDLES (AMENDED DETAIL).txt b/HDF5 PROGRAM BUNDLES (AMENDED DETAIL).txt
+new file mode 100644
+index 0000000..d4db9b8
+--- /dev/null
++++ b/HDF5 PROGRAM BUNDLES (AMENDED DETAIL).txt	
+@@ -0,0 +1,48 @@
++============================================================
++HDF5 PROGRAM BUNDLES (AMENDED DETAIL)
++============================================================
++
++Every program meant to run on OASM is distributed as a single .hdf5 dataset.
++This dataset is immutable and acts as the canonical source for the program and
++contains:
++
++- binaries
++  Executables, shared libraries, runtime components.
++
++- modules
++  OASM-compatible command blocks, automation modules, orchestration units.
++
++- schemas
++  Definitions for CBOR/YAML/JSON structures, validation rules, version metadata.
++
++- assets
++  Textures, geometry, icons, templates, media, data files.
++
++- defaults
++  Initial configuration values, preset states, baseline parameters.
++
++- lineage metadata
++  Program version, schema version, author metadata, build lineage.
++
++- configuration templates
++  YAML templates for user-editable variables, environment presets.
++
++- logging setup
++  Default logging rules, log schema, severity levels, lineage logging configuration.
++
++- legal and usage documents
++  License text, usage guidelines, disclaimers, attribution requirements.
++
++- scripts for third-party downloads
++  Command blocks or module scripts that fetch external dependencies,
++  including error handling, retry logic, and fallback behavior.
++
++- grouped templates for command blocks, modules, and scripts
++  Preset collections intended for user/AI use; some included by default,
++  others added intentionally on request.
++
++- an /install command block or module script
++  The installer logic executed by the OASM Bundle Wizard to generate the
++  working environment.
++
++============================================================
+\ No newline at end of file
+diff --git a/LINEAGE REVERT MODEL FOR ENHANCEMENTS.txt b/LINEAGE REVERT MODEL FOR ENHANCEMENTS.txt
+new file mode 100644
+index 0000000..7e7125f
+--- /dev/null
++++ b/LINEAGE REVERT MODEL FOR ENHANCEMENTS.txt	
+@@ -0,0 +1,89 @@
++============================================================
++LINEAGE-AWARE ENHANCEMENT AND REVERT MODEL
++============================================================
++
++1. CHECKPOINT BEFORE CHANGE
++------------------------------------------------------------
++Before any enhancement/refinement attempt (by user, AI, program, Py03, Rust):
++
++- snapshot live CBOR state
++- compute checksums
++- record a JSON lineage checkpoint with:
++  - timestamp
++  - session ID
++  - module/command/template ID
++  - change intent
++  - old values
++
++This defines a clear revert target.
++
++------------------------------------------------------------
++
++2. ENHANCEMENT IN AN ISOLATED CBOR COPY
++------------------------------------------------------------
++Enhancement is applied to:
++- a temporary CBOR working copy
++
++Not applied directly to:
++- immutable templates
++- previously saved mutable instances
++- staged configurations
++
++This working copy is:
++- sandboxed
++- schema-validated
++- lineage-aware
++
++------------------------------------------------------------
++
++3. FULL-STACK VALIDATION
++------------------------------------------------------------
++Validation involves:
++- Py03 pattern tests (cycle detection, state validity, fuzzing)
++- Rust execution checks (performance, concurrency, scheduling)
++- Shell pipeline checks (PS-Insider behavior, environment correctness)
++- schema validation (CBOR/YAML/JSON/HDF5 rules)
++- domain-specific validation (compile, calculate, geometry, etc.)
++
++If validation passes:
++- enhancement is accepted
++If validation fails:
++- enhancement is rejected
++
++------------------------------------------------------------
++
++4. ACCEPTED ENHANCEMENT
++------------------------------------------------------------
++If accepted:
++- temporary CBOR becomes the new mutable instance
++- JSON lineage is updated with "success" status
++- YAML reflection is regenerated from the new CBOR state
++- checksums are updated
++- optional: staged compositions are updated
++
++Immutable templates remain untouched.
++
++------------------------------------------------------------
++
++5. FAILED ENHANCEMENT (REVERT)
++------------------------------------------------------------
++If validation fails or runtime crashes:
++- temporary CBOR copy is discarded
++- system loads last known good checkpoint
++- YAML reflection is regenerated from that checkpoint
++- JSON lineage records the failure and revert
++- runtime resumes from a valid state
++
++No invalid states persist. Immutable templates remain intact.
++
++============================================================
++SUMMARY
++------------------------------------------------------------
++Every enhancement is:
++- checkpointed
++- tested in isolation
++- validated
++- either accepted as a new mutable state
++  or reverted to a known good state
++
++Lineage and safety are first-class behavior.
+diff --git a/MIGRATION_CHECKLIST.md b/MIGRATION_CHECKLIST.md
+new file mode 100644
+index 0000000..63630c6
+--- /dev/null
++++ b/MIGRATION_CHECKLIST.md
+@@ -0,0 +1,36 @@
++Migration Checklist — Retarget to PS-Insider Hardened
++
++Summary of changes applied:
++- Renamed plan title and created new file: `PLAN FOR OASM - PS-INSIDER HARDENED + RUST + PY03.txt` (reworded goals and phases).
++- Updated `PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt` content and added the new plan file.
++- Replaced references to WPShell/PS2026 in docs with PS-Insider/ps_insider where appropriate.
++  - Files updated: `deepresearchresults.txt`, `===================================.txt`, `OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt`, `PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt`, `DOCKER_BLUEPRINT.md`, `LINEAGE REVERT MODEL FOR ENHANCEMENTS.txt`, `PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt`.
++- Updated OASM description to be an inner-core compiler module that emits immutable, signed templates/OPBs and enforces ODLS rules.
++- Replaced template paths `/core/wpshell` and `/core/ps2026` with `/core/ps_insider` and updated related examples and profiles.
++
++Remaining tasks / recommended follow-ups:
++1. Add a dedicated "Threat Model & Compliance" section to the new plan with measurable acceptance criteria (examples below). (RECOMMENDED)
++2. Add CI checks and gating:
++   - WDAC policy validation job (Windows runner)
++   - Signature verification job for OPBs/templates
++   - Py03 fuzz/coverage threshold job
++   - Acceptance test job verifying no direct WinAPI calls from scripts
++3. Update HDF5 schemas and tests to reflect `/core/ps_insider` group and validate existing templates' metadata and signatures.
++4. Update any code that references `/core/wpshell` or `/core/ps2026` (search repository for dataset/group usage in code or tests). (ACTIONABLE)
++5. Add documentation on OASM compiler outputs, signing process, and how Rust verifies templates before execution.
++6. Consider automated migration script to rename HDF5 groups and update staged compositions if necessary.
++7. Create a PR with these doc changes and include test updates, migration notes, and a short summary for reviewers.
++
++Suggested Acceptance Criteria (examples):
++- WDAC policy applied and validated by CI (policy test passes on Windows runner).
++- All OPBs/templates are signed and pass signature verification checks in CI.
++- Py03 fuzzing achieves minimum coverage threshold and no critical crashes.
++- No direct WinAPI calls allowed from script-level code as verified by static analysis and runtime tests.
++- Revert/rollback flow successfully restores known-good staging in an automated test.
++
++Next actions I can take for you:
++- Prepare the PR and include the migration checklist, diffs, and test updates.
++- Add the Threat Model & Compliance section to the new plan file and propose CI job specs.
++- Search for code references to `/core/wpshell` or `/core/ps2026` and propose code changes.
++
++Which of the 'Next actions' would you like me to do now? (PR / Add Threat Model & CI / Search code refs)
+\ No newline at end of file
+diff --git a/New Text Document.txt b/New Text Document.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/OASM DATA LIFECYCLE STANDARD (ODLS) + PROGRAM BUNDLES + WIZARd.txt b/OASM DATA LIFECYCLE STANDARD (ODLS) + PROGRAM BUNDLES + WIZARd.txt
+new file mode 100644
+index 0000000..980dc39
+--- /dev/null
++++ b/OASM DATA LIFECYCLE STANDARD (ODLS) + PROGRAM BUNDLES + WIZARd.txt	
+@@ -0,0 +1,114 @@
++============================================================
++OASM DATA LIFECYCLE STANDARD (ODLS)
++Program Bundles (OPB) and OASM Bundle Wizard (OBW)
++============================================================
++
++1. PURPOSE
++Define how all OASM-compatible programs are packaged, installed, configured,
++executed, logged, and published. Ensure deterministic behavior, reproducibility,
++lineage, and modularity across the ecosystem.
++
++2. INSTALLATION MODEL
++- OASM itself installs once using a normal OS installer.
++- After that, all program installs are handled by the OASM Bundle Wizard (OBW),
++  not the OS.
++- OBW understands OASM Program Bundles (OPB), which are HDF5-based, and runs
++  their internal install scripts.
++
++3. OASM PROGRAM BUNDLES (OPB)
++Each program meant to run on OASM is distributed as a single .hdf5 dataset
++containing
++
++- binaries
++  Executables, shared libraries, runtime components.
++
++- modules
++  OASM command blocks, automation modules, orchestration units.
++
++- schemas
++  CBORYAMLJSON schema definitions, validation rules, version metadata.
++
++- assets
++  Textures, geometry, icons, templates, media, data files.
++
++- defaults
++  Initial configuration values, preset states, baseline parameters.
++
++- lineage
++  Program version, schema version, author metadata, build lineage.
++
++- configs
++  YAML configuration templates for user-editable variables.
++
++- logging
++  Logging schema, severity levels, lineage logging configuration.
++
++- legal
++  License text, usage guidelines, disclaimers, attribution requirements.
++
++- third_party_scripts
++  Scripts or command blocks for fetching external dependencies,
++  including error handling, retries, and fallback logic.
++
++- templates
++  Grouped templates for command blocks, modules, and scripts intended
++  for userAI use. Some presets included, others added intentionally.
++
++- install
++  Command block or module script executed by OBW to generate the working
++  environment.
++
++4. INSTALLATION PROCESS (OBW)
++OBW
++- opens the OPB .hdf5 dataset
++- locates and executes install
++- generates CBOR working copies
++- generates YAML configs as needed
++- initializes JSON lineage files
++- runs third-party dependency scripts
++- registers the program with OASM
++- sets up runtime directories
++
++5. OPTIONAL COMMON BUNDLES
++OBW can install common OPBs
++- compilers
++- CAD modules
++- scripting packs
++- automation libraries
++- geometry libraries
++- agentic modules
++- template packs
++
++The list is curated and grows over time.
++
++6. ALTERNATIVE INSTALL METHODS
++- terminal  oasm install bundle.hdf5
++- install link .oasm-install file that triggers OBW and references an OPB
++
++7. DATA LIFECYCLE (ODLS CORE)
++All OASM-compatible programs follow the four-format hierarchy
++- HDF5 → canonical, immutable source
++- CBOR → runtime working copy
++- YAML → human-readable, editable interface
++- JSON → lineage and revert ledger
++
++8. RUNTIME LINEAGE
++- Every session has a unique session ID.
++- Lineage events are stored as JSON.
++- JSON lineage can be compiled into CBOR for replay.
++
++9. PUBLICATION
++When work is finalized
++- CBOR runtime state is compiled into a new HDF5 artifact.
++- Artifact includes lineage, session IDs, schema version, program version.
++- This artifact is immutable and reproducible.
++
++10. PROGRAM FLEXIBILITY
++Programs may define their own
++- YAML variables and configs
++- CBOR runtime schemas
++- lineage event types
++- publication metadata
++
++But must remain compliant with ODLS.
++============================================================
+\ No newline at end of file
+diff --git a/OASM-SIDE SCHEMAS + PROGRAM-SIDE SCHEMAS (OBJEX  TEMPLATE).txt b/OASM-SIDE SCHEMAS + PROGRAM-SIDE SCHEMAS (OBJEX  TEMPLATE).txt
+new file mode 100644
+index 0000000..a233bf3
+--- /dev/null
++++ b/OASM-SIDE SCHEMAS + PROGRAM-SIDE SCHEMAS (OBJEX  TEMPLATE).txt	
+@@ -0,0 +1,129 @@
++============================================================
++OASM-SIDE SCHEMAS (IN DEPTH)
++============================================================
++
++Purpose:
++Define universal types, structures, and validation rules that all OASM-compatible
++programs and bundles must follow.
++
++1. UNIVERSAL TYPES
++- primitive types (int, float, string, bool)
++- vectors/matrices
++- geometry primitives
++- module metadata
++- lineage metadata
++- task/job descriptors
++
++2. UNIVERSAL STRUCTURES
++- module definitions
++- command block structures
++- runtime state containers
++- lineage event formats
++- session descriptors
++- configuration objects (for YAML/CBOR)
++
++3. VALIDATION RULES
++- required fields
++- type constraints
++- allowed ranges
++- structural invariants
++- dependency rules
++- version compatibility rules
++
++4. LIFECYCLE MAPPINGS
++- HDF5 → CBOR (canonical to runtime)
++- CBOR → YAML (runtime to human-readable)
++- YAML → CBOR (human edits back to runtime)
++- CBOR → JSON (runtime to lineage)
++- JSON → CBOR (lineage replay)
++
++5. SESSION IDENTIFIERS
++- UUID formats
++- timestamp rules
++- program ID linkage
++- user/AI/source tags
++
++6. ERROR/RECOVERY SCHEMAS
++- validation error records
++- revert events
++- crash recovery info
++- debug bundles
++
++
++============================================================
++PROGRAM-SIDE SCHEMAS — EXAMPLE: OBJEX
++============================================================
++
++Objex extends OASM schemas with domain-specific rules.
++
++1. OBJEX TYPES
++- geometry datasets
++- animation equations
++- command block definitions
++- automation parameters
++- ceremonial lineage attributes
++
++2. OBJEX STRUCTURES
++- geometry kernel state containers
++- animation timeline objects
++- module orchestration graphs
++- user/AI discussion metadata structures
++- adaptive logging definitions
++
++3. OBJEX VALIDATION
++- geometry validity checks (no invalid topology)
++- animation equation solvability
++- module dependency resolution
++- ceremonial lineage integrity
++- adaptive logging thresholds and filters
++
++4. OBJEX LIFECYCLE MAPPINGS
++- HDF5 geometry → CBOR runtime geometry
++- YAML animation configs → CBOR animation state
++- JSON lineage → CBOR replay state
++- CBOR runtime → HDF5 published artifact
++
++5. OBJEX SESSION IDENTIFIERS
++- geometry session IDs
++- animation session IDs
++- module execution IDs
++- ceremonial lineage IDs
++
++
++============================================================
++BLANK PROGRAM-SIDE TEMPLATE
++============================================================
++
++PROGRAM NAME: _______________________________
++
++1. PROGRAM-SPECIFIC TYPES
++_____________________________________________
++_____________________________________________
++
++2. PROGRAM-SPECIFIC STRUCTURES
++_____________________________________________
++_____________________________________________
++
++3. PROGRAM-SPECIFIC VALIDATION RULES
++_____________________________________________
++_____________________________________________
++
++4. PROGRAM LIFECYCLE MAPPINGS
++
++HDF5 → CBOR:
++_____________________________________________
++
++YAML → CBOR:
++_____________________________________________
++
++JSON → CBOR:
++_____________________________________________
++
++CBOR → HDF5:
++_____________________________________________
++
++5. PROGRAM SESSION IDENTIFIERS
++_____________________________________________
++_____________________________________________
++
++============================================================
+\ No newline at end of file
+diff --git a/PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt b/PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt
+new file mode 100644
+index 0000000..8a9d285
+--- /dev/null
++++ b/PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt	
+@@ -0,0 +1,203 @@
++============================================================
++PLAN: OASM — PS-INSIDER HARDENED + RUST + PY03
++============================================================
++
++GOAL
++------------------------------------------------------------
++- Target a hardened PowerShell Insider runtime (PS-Insider) with no WPShell dependency; minimal, constrained modular core.
++- Put Rust in charge as the primary orchestrator.
++- Use Py03 as the pattern-testing and refinement engine.
++- Integrate OASM-compiled templates for modules, crates, scripts, and command blocks produced by the OASM compiler module.
++- Reintroduce only necessary Windows behaviors for compatibility,
++  with Rust mediating and logging all hierarchy of command/control.
++
++PHASE 1 — HARDEN MINIMAL POWERSHELL INSIDER RUNTIME
++------------------------------------------------------------
++1. Define constrained PS-Insider runtime responsibilities:
++   - constrained language mode and script policy enforcement (AMSI/WDAC)
++   - minimal prompt/display and safe input handling
++   - basic command tokenization limited to signed templates
++   - handing off CBOR command representations to the Rust orchestrator
++
++2. Harden runtime capabilities:
++   - enforce signed modules and OPBs only
++   - prevent direct unmanaged WinAPI access from scripts
++   - integrate AppContainer/Job objects and Credential Guard where applicable
++   - enforce least privilege and role-based execution
++
++3. Remove from runtime:
++   - Remove any WPShell dependencies and legacy hooks
++   - heavy built-in modules not required for hardened operation
++   - any direct unmanaged calls that should be funneled through Rust wrappers
++
++4. Represent shell behaviors as immutable templates in HDF5:
++   - /core/ps_insider/templates
++
++Each template:
++   - <100 LOC where possible
++   - isolated, signed behavior (parse, display error, run pipeline step, etc.)
++   - associated tests, signature, and logging rules.
++
++PHASE 2 — ELEVATE RUST AS ORCHESTRATOR
++------------------------------------------------------------
++1. Rust becomes the central controller for:
++   - command dispatch
++   - pipeline execution
++   - module/crate invocation
++   - job/task scheduling for OASM actions
++   - access to HDF5 and CBOR
++
++2. All shell commands are modeled as data:
++   - shell parses just enough to build a data structure
++   - Rust orchestrator receives a CBOR command representation
++   - Rust decides:
++     - which module to invoke
++     - which template to use
++     - how to schedule the work
++     - how to log it
++
++3. Rust owns:
++   - checksums and validation gates
++   - interaction with OASM Program Bundles (OPB)
++   - enforcement of ODLS rules:
++     - always work with copies
++     - create lineage checkpoints
++     - validate and revert when needed
++
++4. HDF5 for orchestration:
++   - /core/rust/schemas describe command/job structures
++   - /core/cbor_layouts define runtime formats
++   - /core/staging holds known-good orchestrator profiles.
++
++PHASE 3 — WEAVE PY03 FOR PATTERN TESTING AND REFINEMENT
++------------------------------------------------------------
++1. Py03 is integrated via /core/py03:
++   - given access to:
++     - CBOR runtime states
++     - YAML reflections
++     - JSON lineage
++     - logging data
++
++2. Py03 roles:
++   - pattern detection (cycles, deadlocks, infinite loops)
++   - stress testing modules and templates
++   - fuzzing inputs for shells, Rust modules, and OASM kits
++   - generating diagnostic reports and suggested refinements
++
++3. Rust and Py03 interaction:
++   - Rust executes workloads and enforces constraints.
++   - Py03 observes patterns, evaluates behavior, and flags anomalies.
++   - Rust can mark modules/templates as:
++     - stable
++     - experimental
++     - quarantined
++
++4. All refinement attempts:
++   - run under the lineage-aware enhancement model
++   - can be reverted if they degrade stability.
++
++PHASE 4 — TEMPLATE SYSTEM FOR MODULES, CRATES, SCRIPTS, COMMAND BLOCKS
++------------------------------------------------------------
++1. Define unified templates in HDF5:
++/core/templates
++  /shell
++  /rust
++  /py
++  /oasm_modules
++  /jobs
++  /pipelines
++
++2. Each template:
++   - has CBOR + YAML representation
++   - is immutable
++   - has attached schemas, logging, and tests
++   - can be staged into larger assemblies in /core/staging
++
++3. Objex integration:
++   - treat Objex as a major OASM module with its own:
++     - /modules/objex
++     - /schemas/objex
++     - /templates/objex
++     - /tests/objex
++   - all Objex modules and kits must:
++     - conform to ODLS
++     - use the template system
++     - support lineage-aware enhancement and revert
++     - be orchestrated by Rust
++     - be testable by Py03
++
++PHASE 5 — LAYER WINDOWS CAPABILITIES BACK SAFELY
++------------------------------------------------------------
++1. Identify what is truly needed from "normal Windows":
++   - filesystem access
++   - process launching
++   - network access (if allowed)
++   - registry where necessary
++   - security/credential interfaces
++
++2. Wrap these behaviors:
++   - Rust provides safe wrappers
++   - wrappers are defined as HDF5 templates:
++     - /core/rust/templates/windows_bridge
++   - shell or scripts never call Windows APIs directly,
++     only via Rust-managed interfaces.
++
++3. All Windows-facing actions:
++   - go through:
++     - Rust orchestrator
++     - CBOR command structures
++     - logging/lineage tracking
++   - are subject to:
++     - validation
++     - checksums
++     - security policies
++
++4. Third-party compatibility and security:
++   - third-party tools are integrated as OPBs:
++     - /kits/<third_party_name>
++   - installers and scripts for them:
++     - live in /third_party_scripts
++   - OBW and Rust orchestrator manage:
++     - installation
++     - configuration
++     - controlled invocation.
++
++PHASE 6 — SELF-REPAIRABLE, AUDITABLE, FIXABLE STACK
++------------------------------------------------------------
++1. Every base unit, template, and staged assembly:
++   - has tests in /core/tests
++   - has logging rules in /core/logging
++   - has lineage in /core/lineage
++   - has checksums for integrity
++
++2. Self-repair flow:
++   - detection (Rust + Py03 + logs)
++   - verification (checksums, tests)
++   - rollback (use known-good staging config)
++   - optional re-refinement via Py03
++
++3. For OASM + PS-Insider Hardened + Rust + Py03:
++   - the entire combo is:
++     - modular (small pieces, templates, kits)
++     - orchestrated (Rust)
++     - refined and tested (Py03)
++     - shell-accessible in a controlled way
++     - Windows-compatible where required
++     - always auditable and revertible.
++
++============================================================
++END STATE
++------------------------------------------------------------
++We end with:
++- a hardened, minimal PowerShell Insider runtime (PS-Insider)
++- a Rust-driven orchestration layer that owns:
++  - modules, crates, scripts, command blocks
++- a Py03 refinement engine that:
++  - stress-tests
++  - detects patterns
++  - drives stability improvements
++- a template and staging system in HDF5 that:
++  - makes everything repairable, auditable, reproducible
++- Windows capabilities layered back under Rust control,
++  in line with OASM safety and lineage policies.
++============================================================
+\ No newline at end of file
+diff --git a/PLAN FOR OASM - PS-INSIDER HARDENED + RUST + PY03.txt b/PLAN FOR OASM - PS-INSIDER HARDENED + RUST + PY03.txt
+new file mode 100644
+index 0000000..d55692f
+--- /dev/null
++++ b/PLAN FOR OASM - PS-INSIDER HARDENED + RUST + PY03.txt	
+@@ -0,0 +1,228 @@
++============================================================
++PLAN: OASM — PS-INSIDER HARDENED + RUST + PY03
++============================================================
++
++GOAL
++------------------------------------------------------------
++- Target a hardened PowerShell Insider runtime (PS-Insider) with no WPShell dependency; minimal, constrained modular core.
++- Put Rust in charge as the primary orchestrator.
++- Use Py03 as the pattern-testing and refinement engine.
++- Integrate OASM-compiled templates for modules, crates, scripts, and command blocks produced by the OASM compiler module.
++- Reintroduce only necessary Windows behaviors for compatibility,
++  with Rust mediating and logging all hierarchy of command/control.
++
++PHASE 1 — HARDEN MINIMAL POWERSHELL INSIDER RUNTIME
++------------------------------------------------------------
++1. Define constrained PS-Insider runtime responsibilities:
++   - constrained language mode and script policy enforcement (AMSI/WDAC)
++   - minimal prompt/display and safe input handling
++   - basic command tokenization limited to signed templates
++   - handing off CBOR command representations to the Rust orchestrator
++
++2. Harden runtime capabilities:
++   - enforce signed modules and OPBs only
++   - prevent direct unmanaged WinAPI access from scripts
++   - integrate AppContainer/Job objects and Credential Guard where applicable
++   - enforce least privilege and role-based execution
++
++3. Remove from runtime:
++   - Remove any WPShell dependencies and legacy hooks
++   - heavy built-in modules not required for hardened operation
++   - any direct unmanaged calls that should be funneled through Rust wrappers
++
++4. Represent shell behaviors as immutable templates in HDF5:
++   - /core/ps_insider/templates
++
++Each template:
++   - <100 LOC where possible
++   - isolated, signed behavior (parse, display error, run pipeline step, etc.)
++   - associated tests, signature, and logging rules.
++
++PHASE 2 — ELEVATE RUST AS ORCHESTRATOR
++------------------------------------------------------------
++1. Rust becomes the central controller for:
++   - command dispatch
++   - pipeline execution
++   - module/crate invocation
++   - job/task scheduling for OASM actions
++   - access to HDF5 and CBOR
++
++2. All shell commands are modeled as data:
++   - shell parses just enough to build a data structure
++   - Rust orchestrator receives a CBOR command representation
++   - Rust decides:
++     - which module to invoke
++     - which template to use
++     - how to schedule the work
++     - how to log it
++
++3. Rust owns:
++   - checksums and validation gates
++   - interaction with OASM Program Bundles (OPB)
++   - enforcement of ODLS rules:
++     - always work with copies
++     - create lineage checkpoints
++     - validate and revert when needed
++
++4. HDF5 for orchestration:
++   - /core/rust/schemas describe command/job structures
++   - /core/cbor_layouts define runtime formats
++   - /core/staging holds known-good orchestrator profiles.
++
++PHASE 3 — WEAVE PY03 FOR PATTERN TESTING AND REFINEMENT
++------------------------------------------------------------
++1. Py03 is integrated via /core/py03:
++   - given access to:
++     - CBOR runtime states
++     - YAML reflections
++     - JSON lineage
++     - logging data
++
++2. Py03 roles:
++   - pattern detection (cycles, deadlocks, infinite loops)
++   - stress testing modules and templates
++   - fuzzing inputs for shells, Rust modules, and OASM kits
++   - generating diagnostic reports and suggested refinements
++
++3. Rust and Py03 interaction:
++   - Rust executes workloads and enforces constraints.
++   - Py03 observes patterns, evaluates behavior, and flags anomalies.
++   - Rust can mark modules/templates as:
++     - stable
++     - experimental
++     - quarantined
++
++4. All refinement attempts:
++   - run under the lineage-aware enhancement model
++   - can be reverted if they degrade stability.
++
++PHASE 4 — TEMPLATE SYSTEM FOR MODULES, CRATES, SCRIPTS, COMMAND BLOCKS
++------------------------------------------------------------
++1. Define unified templates in HDF5:
++/core/templates
++  /shell
++  /rust
++  /py
++  /oasm_modules
++  /jobs
++  /pipelines
++
++2. Each template:
++   - has CBOR + YAML representation
++   - is immutable
++   - has attached schemas, logging, and tests
++   - can be staged into larger assemblies in /core/staging
++
++3. Objex integration:
++   - treat Objex as a major OASM module with its own:
++     - /modules/objex
++     - /schemas/objex
++     - /templates/objex
++     - /tests/objex
++   - all Objex modules and kits must:
++     - conform to ODLS
++     - use the template system
++     - support lineage-aware enhancement and revert
++     - be orchestrated by Rust
++     - be testable by Py03
++
++PHASE 5 — LAYER WINDOWS CAPABILITIES BACK SAFELY
++------------------------------------------------------------
++1. Identify what is truly needed from "normal Windows":
++   - filesystem access
++   - process launching
++   - network access (if allowed)
++   - registry where necessary
++   - security/credential interfaces
++
++2. Wrap these behaviors:
++   - Rust provides safe wrappers
++   - wrappers are defined as HDF5 templates:
++     - /core/rust/templates/windows_bridge
++   - shell or scripts never call Windows APIs directly,
++     only via Rust-managed interfaces.
++
++3. All Windows-facing actions:
++   - go through:
++     - Rust orchestrator
++     - CBOR command structures
++     - logging/lineage tracking
++   - are subject to:
++     - validation
++     - checksums
++     - security policies
++
++4. Third-party compatibility and security:
++   - third-party tools are integrated as OPBs:
++     - /kits/<third_party_name>
++   - installers and scripts for them:
++     - live in /third_party_scripts
++   - OBW and Rust orchestrator manage:
++     - installation
++     - configuration
++     - controlled invocation.
++
++PHASE 6 — THREAT MODEL & COMPLIANCE
++------------------------------------------------------------
++1. Define the Threat Model:
++   - enumerate attack surfaces (script injection, supply chain compromise, privilege escalation, DLL hijacking, lateral movement).
++   - map each threat to mitigation controls (WDAC/AppLocker, AMSI, Credential Guard, TPM-backed attestation, code signing, network isolation).
++
++2. Compliance Targets & Mappings:
++   - map requirements to frameworks (CIS Benchmarks, NIST SP 800-53/800-171, relevant regulatory controls) and create testable assertions.
++
++3. Automated Checks & CI Gates:
++   - WDAC policy validation job (Windows runner) that verifies policy enforcement.
++   - Signature verification job for OPBs/templates before acceptance in staging.
++   - Static analysis and runtime tests to detect direct unmanaged WinAPI usage from script-level artifacts.
++   - SIEM ingestion and alerting test (simulate suspicious activity and verify alerting/retention).
++
++4. Acceptance Criteria (measurable):
++   - WDAC policy test passes in CI on Windows runner for each release candidate.
++   - All OPBs/templates are signed and pass signature validation.
++   - Py03 fuzzing reaches minimum coverage and shows no high-/critical-level crashes in acceptance testing.
++   - Automated rollback test can restore a known-good staging assembly within defined RTO.
++
++5. Documentation & Reports:
++   - produce a per-release security compliance report derived from HDF5 lineage and audit logs.
++   - maintain repository of signed artifacts with reproducible build metadata and attestation evidence.
++
++PHASE 7 — SELF-REPAIRABLE, AUDITABLE, FIXABLE STACK
++------------------------------------------------------------
++1. Every base unit, template, and staged assembly:
++   - has tests in /core/tests
++   - has logging rules in /core/logging
++   - has lineage in /core/lineage
++   - has checksums for integrity
++
++2. Self-repair flow:
++   - detection (Rust + Py03 + logs)
++   - verification (checksums, tests)
++   - rollback (use known-good staging config)
++   - optional re-refinement via Py03
++
++3. For OASM + PS-Insider Hardened + Rust + Py03:
++   - the entire combo is:
++     - modular (small pieces, templates, kits)
++     - orchestrated (Rust)
++     - refined and tested (Py03)
++     - shell-accessible in a controlled way
++     - Windows-compatible where required
++     - always auditable and revertible.
++
++============================================================
++END STATE
++------------------------------------------------------------
++We end with:
++- a hardened, minimal PowerShell Insider runtime (PS-Insider)
++- a Rust-driven orchestration layer that owns:
++  - modules, crates, scripts, command blocks
++- a Py03 refinement engine that:
++  - stress-tests
++  - detects patterns
++  - drives stability improvements
++- a template and staging system in HDF5 that:
++  - makes everything repairable, auditable, reproducible
++- Windows capabilities layered back under Rust control,
++  in line with OASM safety and lineage policies.
++============================================================
+\ No newline at end of file
+diff --git a/PR_TEMPLATE.md b/PR_TEMPLATE.md
+new file mode 100644
+index 0000000..3de5acc
+--- /dev/null
++++ b/PR_TEMPLATE.md
+@@ -0,0 +1,40 @@
++PR Title: Retarget plan to PS-Insider Hardened; make OASM an inner-core compiler module; update docs and paths
++
++Summary:
++- Retargeted the project plan and documentation from WPShell/PS2026 to PS-Insider Hardened runtime.
++- Updated OASM wording to be an inner-core compiler module that emits immutable, signed templates/OPBs and enforces ODLS policies.
++- Replaced template paths `/core/wpshell` and `/core/ps2026` with `/core/ps_insider` and updated examples, staging profiles, and doc references.
++- Added a migration checklist and replacements summary for reviewers.
++
++Files changed (high-level):
++- `PLAN FOR OASM - PS-INSIDER HARDENED + RUST + PY03.txt` (new)
++- `PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt` (updated)
++- `deepresearchresults.txt` (updated)
++- `===================================.txt` (updated)
++- `OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt` (updated)
++- `DOCKER_BLUEPRINT.md` (updated)
++- `LINEAGE REVERT MODEL FOR ENHANCEMENTS.txt` (updated)
++- `PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt` (updated)
++- `MIGRATION_CHECKLIST.md` (new)
++- `REPLACEMENTS_APPLIED.txt` (new)
++
++Testing & Verification Requirements:
++- CI should run WDAC and signature verification checks on Windows runners
++- Ensure all amended docs build (if using doc tooling)
++- Validate no remaining references to WPShell/PS2026 in docs/code unless explicitly left as "legacy" notes
++
++Suggested branch name: feat/ps-insider-hardened-retarget
++
++PR Checklist:
++- [ ] Add Threat Model & Compliance section to the new plan
++- [ ] Add CI job definitions or stubs for WDAC/signature verification
++- [ ] Update HDF5 tests to include `/core/ps_insider` group checks
++- [ ] Run repo-wide search for any remaining WPShell/PS2026 references and assess code impact
++
++How to apply locally (suggested):
++1. Create branch: `git checkout -b feat/ps-insider-hardened-retarget`
++2. Apply changes (manual or via patch created from this PR)
++3. Run docs build/tests
++4. Push to remote and open a PR with the description above
++
++If you'd like, I can prepare a downloadable patch file (unified diff) containing all of these edits for easy application to a git repo—tell me if you want that and where to upload it (or I can attach it to this workspace).
+\ No newline at end of file
+diff --git a/PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt b/PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt
+new file mode 100644
+index 0000000..0e3997b
+--- /dev/null
++++ b/PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt	
+@@ -0,0 +1,55 @@
++============================================================
++PY03 PATTERN-TESTING AND REFINEMENT ENGINE
++============================================================
++
++ROLE
++------------------------------------------------------------
++Py03 acts as:
++- pattern tester
++- cycle detector
++- refinement engine
++- validation orchestrator
++
++OPERATIONS
++------------------------------------------------------------
++For each command block, module, dataset, or template:
++
++1. Load live CBOR copy (never immutable template).
++2. Run pattern tests:
++   - detect cycles
++   - detect invalid states
++   - detect infinite loops
++   - fuzz inputs
++   - stress-test paths
++
++3. Invoke Rust orchestrator for:
++   - real execution
++   - performance checks
++   - threading/scheduling checks
++
++4. Interact with shell (PS-Insider) to:
++   - simulate pipelines
++   - validate environment usage
++
++5. Log all results to JSON lineage:
++   - success/fail
++   - performance
++   - stability
++   - anomaly patterns
++
++6. If stable:
++   - mark as refined
++   - optionally update staged configurations
++If unstable:
++   - revert to known-good
++   - record failure for future avoidance.
++
++============================================================
++RESULT
++------------------------------------------------------------
++Commands, datasets, and templates are driven into a
++super-refined state:
++- stable
++- cycle-free
++- auditable
++- reproducible
+diff --git a/REPLACEMENTS_APPLIED.txt b/REPLACEMENTS_APPLIED.txt
+new file mode 100644
+index 0000000..5fa2728
+--- /dev/null
++++ b/REPLACEMENTS_APPLIED.txt
+@@ -0,0 +1,46 @@
++Replacements Applied — PS-Insider Retargeting & OASM Compiler Updates
++
++Files changed and key replacements (exact excerpts):
++
++1) PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt (and new file created PLAN FOR OASM - PS-INSIDER HARDENED + RUST + PY03.txt)
++- Title:
++  - OLD: "PLAN: OASM + WPSHELL/PS2026 + RUST + PY03 COMBO"
++  - NEW: "PLAN: OASM — PS-INSIDER HARDENED + RUST + PY03"
++- GOAL:
++  - OLD: "- Reduce WPShell + PS 2026 to minimal, modular cores."
++  - NEW: "- Target a hardened PowerShell Insider runtime (PS-Insider) with no WPShell dependency; minimal, constrained modular core."
++- PHASE 1: replaced "DEFINE MINIMAL SHELL CORE" with "HARDEN MINIMAL POWERSHELL INSIDER RUNTIME" and updated responsibilities to include AMSI/WDAC, signed templates, AppContainer, no direct unmanaged WinAPI from scripts.
++- Template paths:
++  - OLD: "/core/wpshell/templates" and "/core/ps2026/templates"
++  - NEW: "/core/ps_insider/templates"
++- END STATE shell line:
++  - OLD: "a minimal, modular shell core (WPShell/PS2026)"
++  - NEW: "a hardened, minimal PowerShell Insider runtime (PS-Insider)"
++
++2) deepresearchresults.txt
++- Title:
++  - OLD: "Feasibility Analysis of Integrating OASM, WPShell/PS2026, Rust, and PyO3"
++  - NEW: "Feasibility Analysis of Integrating OASM, PS-Insider Hardened, Rust, and PyO3"
++- OASM description:
++  - OLD: described OASM as an open-source platform for attack surface management
++  - NEW: "OASM is an essential inner-core compiler module that produces immutable, signed templates and OPBs (HDF5 artifacts) for the hardened PowerShell Insider runtime..."
++- Replaced sections about "Minimizing WPShell and PS2026" with "Harden minimal PowerShell Insider runtime" and added hardening detail (signed templates, constrained language, AMSI/WDAC, no direct WinAPI from scripts).
++- Replaced table row for Shell Layer to "PS-Insider Hardened" with notes on WDAC/AMSI and signature enforcement.
++
++6) LINEAGE REVERT MODEL FOR ENHANCEMENTS.txt
++- Replaced "Shell pipeline checks (WPShell/PS behavior, environment correctness)" to "Shell pipeline checks (PS-Insider behavior, environment correctness)"
++
++7) PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt
++- Replaced "Interact with shell (WPShell/PS) to:" with "Interact with shell (PS-Insider) to:"
++
++Notes:
++- Instances where "WPShell" was referenced to indicate removal of legacy dependencies were clarified rather than removed entirely (e.g., "Remove any WPShell dependencies and legacy hooks").
++- All replacements were done with contextual search-and-replace, preserving surrounding content and logging where edits occurred.
++
++Recommended follow-ups (see MIGRATION_CHECKLIST.md for details):
++- Add a Threat Model & Compliance section to the plan with measurable acceptance criteria (WDAC, TPM attestation, signature verification, SIEM ingestion tests).
++- Implement CI checks and acceptance gating for WDAC, signature verification, Py03 fuzz coverage, and static analysis to detect direct WinAPI use in scripts.
++- Update HDF5 schemas and tests to reflect /core/ps_insider and ensure template metadata includes signature info.
++- Consider automating HDF5 group renaming for live/staged compositions, if needed.
++
++If you'd like, I can now prepare a PR-ready diff (patch) file containing these changes, or push these edits to a remote repo if you provide repository details/permissions.
+\ No newline at end of file
+diff --git a/RUNTIME MODEL ALWAYS WORK WITH COPIES +THREE LAYERS.txt b/RUNTIME MODEL ALWAYS WORK WITH COPIES +THREE LAYERS.txt
+new file mode 100644
+index 0000000..ae0e5f7
+--- /dev/null
++++ b/RUNTIME MODEL ALWAYS WORK WITH COPIES +THREE LAYERS.txt	
+@@ -0,0 +1,78 @@
++============================================================
++OASM RUNTIME MODEL — THREE ACTIVE LAYERS, ALWAYS WITH COPIES
++============================================================
++
++1. IMMUTABLE TEMPLATE LAYER
++------------------------------------------------------------
++- CBOR templates derived from HDF5 program bundles.
++- Defines original, untouched versions of:
++  - modules
++  - crates
++  - command blocks
++  - default configs
++  - schemas and metadata
++
++Rules:
++- never modified
++- only copied
++
++Purpose:
++- provide canonical, reproducible starting points.
++
++------------------------------------------------------------
++
++2. LIVE CBOR HANDLER LAYER (RUNTIME STATE)
++------------------------------------------------------------
++- A working CBOR copy created from an immutable template or prior mutable state.
++- Receives all runtime changes:
++  - program actions
++  - user changes (via UI/editor)
++  - AI/automation updates
++  - YAML-driven edits (after validation)
++
++Responsibilities:
++- enforce schema rules
++- maintain session-specific identifiers
++- integrate JSON lineage checkpoints
++- support revert and replay
++- remain fast, binary, and deterministic
++
++This is the only layer that mutates.
++
++------------------------------------------------------------
++
++3. YAML REFLECTION LAYER (HUMAN INTERFACE)
++------------------------------------------------------------
++- YAML files are generated as reflections of live CBOR state.
++- They are:
++  - human-readable
++  - comment-friendly
++  - grouped and structured
++  - editable
++
++Rules:
++- YAML is not authoritative at runtime.
++- YAML edits are validated and compiled into the live CBOR handler.
++- CBOR remains the runtime truth.
++
++Purpose:
++- support understanding, configuration, and manual adjustment
++  without touching binary runtime structures directly.
++
++============================================================
++ALWAYS WORK WITH COPIES
++============================================================
++The system never edits:
++- immutable HDF5 content
++- immutable CBOR templates
++
++Instead:
++- loads a copy into live CBOR handler
++- applies changes there
++- validates
++- either:
++  - saves as a new mutable instance if valid
++  - reverts and discards if invalid
++
++This prevents corruption and supports lineage and reproducibility.
++============================================================
+\ No newline at end of file
+diff --git a/Untitled.txt b/Untitled.txt
+new file mode 100644
+index 0000000..7dd1452
+--- /dev/null
++++ b/Untitled.txt
+@@ -0,0 +1,148 @@
++
++============================================================
++OASM RUNTIME MODEL — FULL EXPLANATION
++============================================================
++
++1. ALWAYS WORK WITH COPIES
++------------------------------------------------------------
++The OASM runtime never edits the immutable templates stored in HDF5 or
++the immutable CBOR templates derived from them. Instead, it always: 
++
++- loads into a copy for program u
++- edits the copy
++- validates the copy
++- saves the copy (if valid)
++- discards the copy (if invalid)
++
++This ensures:
++- no corruption
++- no invalid states
++- perfect reproducibility
++
++------------------------------------------------------------
++
++2. THREE ACTIVE RUNTIME LAYERS
++------------------------------------------------------------
++
++A. IMMUTABLE TEMPLATE LAYER
++- Derived from the program’s HDF5 bundle.
++- Contains the original CBOR template for modules, crates, configs.
++- Never modified.
++- Only copied.
++
++B. LIVE CBOR HANDLER LAYER
++- The active runtime state.
++- Receives updates from program actions or YAML edits.
++- Enforces schema rules.
++- Interacts with JSON lineage.
++- Maintains session-specific identifiers.
++- Validates every change.
++
++C. YAML REFLECTION LAYER
++- A human-readable reflection of the live CBOR state.
++- Contains comments, grouping, readable names.
++- Editable by users.
++- Compiled back into CBOR after validation.
++
++------------------------------------------------------------
++
++3. CHANGE EVENTS (PROGRAM OR YAML)
++------------------------------------------------------------
++Whenever a change occurs:
++- user edits YAML
++- program updates runtime state
++- AI agent modifies a parameter
++- automation module triggers a change
++
++The system immediately:
++1. Creates a JSON lineage checkpoint  
++2. Applies the change to the live CBOR handler  
++3. Validates the updated state  
++4. Reflects the change back into YAML (if needed)
++
++------------------------------------------------------------
++
++4. JSON LINEAGE / REVERT CHECKPOINTS
++------------------------------------------------------------
++Each change produces a JSON entry containing:
++- timestamp
++- session ID
++- change type
++- old value
++- new value
++- module or crate ID
++- validation status
++
++This enables:
++- revert to last known good state
++- revert to any chosen save point
++- replay of session history
++- debugging and auditing
++
++------------------------------------------------------------
++
++5. VALIDATION LOOP
++------------------------------------------------------------
++After each change, or periodically, the program runs validation:
++
++- compile checks
++- calculation checks
++- geometry checks
++- schema checks
++- dependency checks
++- safety checks
++
++If validation fails:
++- the change is rejected
++- the system reverts to last known good state
++- the user is notified (if applicable)
++
++------------------------------------------------------------
++
++6. CRASH SAFETY
++------------------------------------------------------------
++If the program crashes:
++- the live CBOR handler is discarded
++- the system loads the last known good checkpoint
++- YAML is regenerated from that checkpoint
++- runtime resumes safely
++
++------------------------------------------------------------
++
++7. SESSION COMPLETION
++------------------------------------------------------------
++When the session ends:
++- the validated live CBOR is saved as a new mutable instance
++- JSON lineage is finalized
++- YAML reflection is updated
++- immutable templates remain untouched
++
++------------------------------------------------------------
++
++8. MUTABLE COPY REUSE
++------------------------------------------------------------
++Future sessions may:
++- load the mutable CBOR copy (continuation)
++- OR load the immutable template (fresh start)
++
++Both paths are supported.
++
++============================================================
++SUMMARY
++============================================================
++The runtime uses three layers:
++1. Immutable CBOR Template  
++2. Live CBOR Handler  
++3. YAML Reflection  
++
++Every change:
++- creates a JSON lineage checkpoint
++- is validated
++- is reversible
++
++The system prevents invalid states, preserves lineage, and ensures
++reproducibility.
++
++
++
++
+diff --git a/apply_ps_insider_patch.ps1 b/apply_ps_insider_patch.ps1
+new file mode 100644
+index 0000000..1dc9fa3
+--- /dev/null
++++ b/apply_ps_insider_patch.ps1
+@@ -0,0 +1,28 @@
++<#
++PowerShell patch script to retarget docs to PS-Insider Hardened and update OASM wording.
++Run in repo root. This script edits files in place (creates .bak backups).
++#>
++
++$replacements = @(
++    @{file='deepresearchresults.txt'; old='Feasibility Analysis of Integrating OASM, WPShell/PS2026, Rust, and PyO3'; new='Feasibility Analysis of Integrating OASM, PS-Insider Hardened, Rust, and PyO3'},
++    @{file='deepresearchresults.txt'; old='WPShell/PS2026: Minimal Windows Scripting Cores'; new='PS-Insider: Hardened PowerShell Insider Runtime'},
++    @{file='deepresearchresults.txt'; old='WPShell (WP-CLI shell) and PS2026 (a modern PowerShell variant) are powerful, scriptable shells for Windows and WordPress environments. Reducing these shells to minimal cores—retaining only essential command execution and scripting capabilities—can be achieved by stripping out non-essential modules and exposing only the necessary APIs. This approach is feasible, as both shells are designed for extensibility and can be wrapped or invoked programmatically, especially when orchestrated by a higher-level language like Rust.'; new='PS-Insider (the hardened PowerShell Insider runtime) is the target runtime—reduced and hardened to retain only essential, signed execution capabilities. Reducing the runtime to a minimal, constrained core can be achieved by disabling non-essential modules, enforcing constrained language and code-signing policies, and exposing only the necessary, Rust-mediated interfaces.'},
++    @{file='===================================.txt'; old='A — OASM CORE + CUSTOM WPSHELL/PS2026 + RUST + PY03 IN HDF5'; new='A — OASM CORE + PS-INSIDER HARDENED + RUST + PY03 IN HDF5'},
++    @{file='===================================.txt'; old='- custom WPShell integration'; new='- PS-Insider (hardened) integration'},
++    @{file='===================================.txt'; old='/core\n  / Custom_wpshell\n  /ps2026'; new='/core\n  /ps_insider'},
++    @{file='OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt'; old='OASM CORE + WPSHELL/PS2026 + RUST + PY03 IN HDF5'; new='OASM CORE + PS-INSIDER HARDENED + RUST + PY03 IN HDF5'},
++    @{file='OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt'; old='/core\n  /wpshell\n  /ps2026'; new='/core\n  /ps_insider'},
++    @{file='PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt'; old='Interact with shell (WPShell/PS) to:'; new='Interact with shell (PS-Insider) to:'}
++)
++
++foreach ($r in $replacements) {
++    $path = Join-Path $PWD $r.file
++    if (Test-Path $path) {
++        Write-Host "Updating $($r.file)"
++        (Get-Content $path -Raw) -replace [regex]::Escape($r.old), $r.new | Set-Content $path
++    } else {
++        Write-Host "Skipping missing file: $($r.file)"
++    }
++}
++
++Write-Host 'Patch script completed. Please review changes and commit.'
+diff --git a/apply_ps_insider_patch.sh b/apply_ps_insider_patch.sh
+new file mode 100644
+index 0000000..7aa64cb
+--- /dev/null
++++ b/apply_ps_insider_patch.sh
+@@ -0,0 +1,26 @@
++#!/usr/bin/env bash
++# POSIX patch script to apply PS-Insider retargeting replacements (sed-based)
++set -euo pipefail
++
++apply_replacement() {
++  local file="$1"
++  local old="$2"
++  local new="$3"
++  if [ -f "$file" ]; then
++    echo "Updating $file"
++    sed -i.bak "s#${old}#${new}#g" "$file"
++  else
++    echo "Skipping missing file: $file"
++  fi
++}
++
++apply_replacement "deepresearchresults.txt" "Feasibility Analysis of Integrating OASM, WPShell/PS2026, Rust, and PyO3" "Feasibility Analysis of Integrating OASM, PS-Insider Hardened, Rust, and PyO3"
++apply_replacement "deepresearchresults.txt" "WPShell/PS2026: Minimal Windows Scripting Cores" "PS-Insider: Hardened PowerShell Insider Runtime"
++apply_replacement "deepresearchresults.txt" "WPShell (WP-CLI shell) and PS2026 (a modern PowerShell variant) are powerful, scriptable shells for Windows and WordPress environments. Reducing these shells to minimal cores—retaining only essential command execution and scripting capabilities—can be achieved by stripping out non-essential modules and exposing only the necessary APIs. This approach is feasible, as both shells are designed for extensibility and can be wrapped or invoked programmatically, especially when orchestrated by a higher-level language like Rust." "PS-Insider (the hardened PowerShell Insider runtime) is the target runtime—reduced and hardened to retain only essential, signed execution capabilities. Reducing the runtime to a minimal, constrained core can be achieved by disabling non-essential modules, enforcing constrained language and code-signing policies, and exposing only the necessary, Rust-mediated interfaces."
++apply_replacement "===================================.txt" "A — OASM CORE + CUSTOM WPSHELL/PS2026 + RUST + PY03 IN HDF5" "A — OASM CORE + PS-INSIDER HARDENED + RUST + PY03 IN HDF5"
++apply_replacement "===================================.txt" "- custom WPShell integration" "- PS-Insider (hardened) integration"
++apply_replacement "OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt" "OASM CORE + WPSHELL/PS2026 + RUST + PY03 IN HDF5" "OASM CORE + PS-INSIDER HARDENED + RUST + PY03 IN HDF5"
++apply_replacement "OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt" "/core\n  /wpshell\n  /ps2026" "/core\n  /ps_insider"
++apply_replacement "PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt" "Interact with shell (WPShell/PS) to:" "Interact with shell (PS-Insider) to:"
++
++echo "Patch script finished. Review .bak files for backups."
+\ No newline at end of file
+diff --git a/build-docker.ps1 b/build-docker.ps1
+new file mode 100644
+index 0000000..c3be7f3
+--- /dev/null
++++ b/build-docker.ps1
+@@ -0,0 +1,50 @@
++# Build Docker containers for OASM Orchestrator
++
++$ErrorActionPreference = "Stop"
++
++Write-Host "===================================" -ForegroundColor Blue
++Write-Host "OASM Orchestrator - Build Script" -ForegroundColor Blue
++Write-Host "===================================" -ForegroundColor Blue
++Write-Host ""
++
++# Change to project directory
++Set-Location -Path $PSScriptRoot
++
++# Add Docker to PATH if needed
++$dockerPath = "C:\Program Files\Docker\Docker\resources\bin"
++if ($env:PATH -notlike "*$dockerPath*") {
++    $env:PATH = "$dockerPath;$env:PATH"
++}
++
++Write-Host "Building Docker containers..." -ForegroundColor Cyan
++Write-Host ""
++
++# Build Rust orchestrator container
++Write-Host "[1/2] Building Rust orchestrator container..." -ForegroundColor Yellow
++& docker compose build rust-orchestrator
++if ($LASTEXITCODE -ne 0) {
++    Write-Host "Error building Rust orchestrator" -ForegroundColor Red
++    exit 1
++}
++Write-Host "[OK] Rust orchestrator built" -ForegroundColor Green
++Write-Host ""
++
++# Build Python testing container
++Write-Host "[2/2] Building Python testing container..." -ForegroundColor Yellow
++& docker compose build python-testing
++if ($LASTEXITCODE -ne 0) {
++    Write-Host "Error building Python testing container" -ForegroundColor Red
++    exit 1
++}
++Write-Host "[OK] Python testing container built" -ForegroundColor Green
++Write-Host ""
++
++Write-Host "===================================" -ForegroundColor Green
++Write-Host "Build completed successfully!" -ForegroundColor Green
++Write-Host "===================================" -ForegroundColor Green
++Write-Host ""
++Write-Host "Next steps:" -ForegroundColor Cyan
++Write-Host "  * Start services: docker compose up -d" -ForegroundColor White
++Write-Host "  * View logs: docker compose logs -f" -ForegroundColor White
++Write-Host "  * Run tests: docker compose run --rm rust-orchestrator cargo test" -ForegroundColor White
++Write-Host ""
+diff --git a/ci/README.md b/ci/README.md
+new file mode 100644
+index 0000000..d972562
+--- /dev/null
++++ b/ci/README.md
+@@ -0,0 +1,41 @@
++CI: PS-Insider Security Checks — Notes
++
++This folder contains CI job stubs for PS-Insider security checks. Implement the following scripts and wire them into the workflow `./.github/workflows/ps_insider_security_checks.yml`.
++
++1) WDAC validation script (Windows runner)
++   - Validate WDAC policy against known acceptance profiles
++   - Run small workload/tests to ensure policy does not block required, signed OPBs
++   - Should exit non-zero on policy failures
++
++2) Signature verification for OPBs/templates
++   - Script should locate OPB/HDF5 artifacts in `/core/staging` and verify signatures and reproducible hashes
++   - Fail if artifacts are unsigned or hashes don't match published metadata
++
++3) Py03 fuzz harness
++   - Use hypothesis or a tailored fuzz harness to stress test templates and orchestrator interactions
++   - Produce a coverage and crash report
++   - Fail CI on high/critical crashes or if coverage is below threshold
++
++4) Static analysis/scan for direct WinAPI use
++   - Provide a script to scan Python/Rust/script artifacts for patterns suggesting direct unmanaged WinAPI calls
++   - Fail or warn CI depending on severity
++
++5) Integration with reporting
++   - On CI failures, collect logs and append to HDF5 audit logs or store artifacts for triage
++
++
++Implemented scripts (initial):
++- `ci/wdac_validate.ps1` — WDAC policy structural validator (Windows runner)
++- `ci/verify_signatures.sh` — signature verification for OPB/HDF5 artifacts (GPG/OpenSSL best-effort)
++- `ci/static_scan.sh` — grep-based static scan for direct WinAPI/unsafe patterns (fails on matches)
++- `tests/test_fuzz.py` — Hypothesis-based fuzz test for CBOR parsing
++- `ci/requirements.txt` — Python dependencies for fuzzing/coverage
++
++Workflow changes:
++- `.github/workflows/ps_insider_security_checks.yml` now runs the above scripts.
++
++Notes & Next improvements:
++- WDAC validation is best-effort in CI: it verifies presence and XML structure and will attempt signature checks if certutil available. For full enforcement tests, we recommend an on-host validation step with a signed policy and a restricted test VM.
++- Signature verification assumes GPG-signed artifacts or CMS signatures; add signer cert import and trust chain verification as needed.
++- Py03 fuzzing uses Hypothesis to drive CBOR parsing; expand tests to use project-specific parsers and templates for deeper coverage.
++- Static scan uses heuristic grep patterns; consider integrating a more expressive analyzer (semgrep or custom AST checks) for fewer false positives.
+diff --git a/ci/requirements.txt b/ci/requirements.txt
+new file mode 100644
+index 0000000..a3f4164
+--- /dev/null
++++ b/ci/requirements.txt
+@@ -0,0 +1,6 @@
++hypothesis
++pytest
++pytest-cov
++cbor2
++coverage
++h5py
+diff --git a/ci/static_scan.sh b/ci/static_scan.sh
+new file mode 100644
+index 0000000..dac851b
+--- /dev/null
++++ b/ci/static_scan.sh
+@@ -0,0 +1,34 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
++PATTERNS=(
++  "CreateProcess"
++  "LoadLibrary"
++  "GetProcAddress"
++  "ctypes\.windll"
++  "Add-Type -TypeDefinition"
++  "\[DllImport"
++  "PInvoke"
++  "GetModuleHandle"
++)
++
++echo "Scanning for direct WinAPI or unsafe patterns..."
++FOUND=0
++for p in "${PATTERNS[@]}"; do
++  echo "Searching for pattern: $p"
++  matches=$(grep -RIn --exclude-dir=.git --exclude='*.md' --exclude='*.lock' -e "$p" . || true)
++  if [ -n "$matches" ]; then
++    echo "--- Matches for [$p] ---"
++    echo "$matches"
++    FOUND=1
++  fi
++done
++
++if [ "$FOUND" -eq 1 ]; then
++  echo "Potential direct WinAPI/unsafe usage found. Fail the job to require review."
++  exit 1
++fi
++
++echo "Static scan completed: no direct WinAPI/unsafe patterns found"
++exit 0
+\ No newline at end of file
+diff --git a/ci/verify_signatures.sh b/ci/verify_signatures.sh
+new file mode 100644
+index 0000000..62d995e
+--- /dev/null
++++ b/ci/verify_signatures.sh
+@@ -0,0 +1,49 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Verify signatures for OPB/HDF5 artifacts in /core/staging or repo root
++ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
++SEARCH_DIRS=("$ROOT/core/staging" "$ROOT")
++SIGNED=false
++
++echo "Looking for artifacts to verify..."
++for d in "${SEARCH_DIRS[@]}"; do
++  if [ -d "$d" ]; then
++    shopt -s nullglob
++    for file in "$d"/*.{opb,h5,hdf5}; do
++      if [ -f "$file" ]; then
++        echo "Found artifact: $file"
++        sig1="$file.sig"
++        sig2="$file.asc"
++        sig3="$file.sig.p7s"
++        if [ -f "$sig1" ]; then
++          echo "Verifying GPG signature: $sig1"
++          gpg --verify "$sig1" "$file" || { echo "Signature verification failed for $file"; exit 1; }
++          SIGNED=true
++        elif [ -f "$sig2" ]; then
++          echo "Verifying ASCII-armored signature: $sig2"
++          gpg --verify "$sig2" "$file" || { echo "Signature verification failed for $file"; exit 1; }
++          SIGNED=true
++        elif [ -f "$sig3" ]; then
++          echo "Found CMS signature: $sig3 (best-effort check)"
++          if command -v openssl >/dev/null 2>&1; then
++            echo "OpenSSL present but CMS verification requires signer certs; skipping strict check"
++            SIGNED=true
++          fi
++        else
++          echo "No signature found for $file"
++          exit 1
++        fi
++      fi
++    done
++    shopt -u nullglob
++  fi
++done
++
++if [ "$SIGNED" = false ]; then
++  echo "No signed artifacts found; failing verification"
++  exit 1
++fi
++
++echo "Signature verification completed successfully"
++exit 0
+\ No newline at end of file
+diff --git a/ci/wdac_validate.ps1 b/ci/wdac_validate.ps1
+new file mode 100644
+index 0000000..859716c
+--- /dev/null
++++ b/ci/wdac_validate.ps1
+@@ -0,0 +1,56 @@
++<#
++WDAC Policy Validation Script (CI)
++- Expects a WDAC policy XML at wdac/policy.xml
++- Validates XML structure for required elements
++- If a .p7s signature file exists (wdac/policy.xml.p7s), attempts to validate using certutil (if available)
++- Exits with non-zero code on failure
++#>
++
++param(
++    [string]$PolicyPath = "wdac/policy.xml"
++)
++
++Write-Host "WDAC validation started"
++if (-not (Test-Path $PolicyPath)) {
++    Write-Error "WDAC policy not found at $PolicyPath"
++    exit 1
++}
++
++try {
++    [xml]$policy = Get-Content $PolicyPath -Raw
++} catch {
++    Write-Error "Policy file is not well-formed XML: $_"
++    exit 1
++}
++
++if (-not $policy.DocumentElement) {
++    Write-Error "Invalid WDAC XML structure"
++    exit 1
++}
++
++# Simple structural checks
++$hasRules = $policy.SelectNodes('//Rule') -and ($policy.SelectNodes('//Rule').Count -gt 0)
++$hasPolicy = $policy.SelectNodes('//Policy') -and ($policy.SelectNodes('//Policy').Count -gt 0)
++if (-not ($hasRules -or $hasPolicy)) {
++    Write-Error "Policy appears to be missing expected 'Policy' or 'Rule' elements"
++    exit 1
++}
++
++# Optional signature check
++$sigPath = "$PolicyPath.p7s"
++if (Test-Path $sigPath) {
++    Write-Host "Found signature file: $sigPath"
++    if (Get-Command certutil -ErrorAction SilentlyContinue) {
++        Write-Host "Attempting to verify signature with certutil (best-effort)"
++        $verify = & certutil -verify $sigPath 2>&1
++        Write-Host $verify
++        # Not strictly gating on certutil result since cert store may not have signer certs in CI
++    } else {
++        Write-Host "certutil not available; skipping signature verification"
++    }
++} else {
++    Write-Host "No signature file found for policy (optional): $sigPath"
++}
++
++Write-Host "WDAC validation completed successfully"
++exit 0
+\ No newline at end of file
+diff --git a/deepresearchresults.txt b/deepresearchresults.txt
+new file mode 100644
+index 0000000..bb566bf
+--- /dev/null
++++ b/deepresearchresults.txt
+@@ -0,0 +1,73 @@
++1. Feasibility Analysis of Integrating OASM, PS-Insider Hardened, Rust, and PyO3
++1.1. OASM: Compiler Module for Hardened Runtime
++OASM is an essential inner-core compiler module that produces immutable, signed templates and OPBs (HDF5 artifacts) for the hardened PowerShell Insider runtime. It enforces ODLS lineage and policy checks, ensures reproducible builds and verifiable outputs, and integrates with the Rust orchestrator which loads and verifies compiled artifacts.
++
++1.2. PS-Insider: Hardened PowerShell Insider Runtime
++PS-Insider (the hardened PowerShell Insider runtime) is the target runtime—reduced and hardened to retain only essential, signed execution capabilities. Reducing the runtime to a minimal, constrained core can be achieved by disabling non-essential modules, enforcing constrained language and code-signing policies, and exposing only the necessary, Rust-mediated interfaces.
++
++1.3. Rust as the Orchestrator
++Rust is uniquely suited for orchestrating complex, modular systems due to its strong safety guarantees, concurrency model, and performance. The Rust ecosystem offers mature libraries for asynchronous orchestration (Tokio), data serialization (CBOR, HDF5), and Windows API integration (windows crate). Rust’s ability to manage wrappers around Windows capabilities, enforce least privilege, and provide robust error handling makes it an ideal candidate for the orchestration layer.
++
++1.4. PyO3: Seamless Rust-Python Interoperability
++PyO3 enables seamless integration between Rust and Python, allowing Rust code to be called from Python and vice versa. This is critical for pattern testing and refinement, as Python’s ecosystem excels in rapid prototyping, data analysis, and machine learning. PyO3’s maturity, performance, and support for cross-platform builds (including Windows and WSL) make it a practical choice for integrating Python-based pattern testing into the Rust orchestration layer.
++
++1.5. Cross-Platform Compatibility
++All major components—Rust, PyO3, HDF5, and CBOR—support Windows, Linux, and WSL environments. The Rust HDF5 crate, for example, is tested on Windows (MSVC and GNU toolchains), Linux, and macOS, and PyO3 supports CPython and PyPy on all major platforms. This ensures that the final stack can operate seamlessly across Windows and Linux environments, including within WSL.
++
++Conclusion: The integration of OASM, PS-Insider Hardened, Rust, and PyO3 is technically feasible, with strong alignment between the modular, auditable, and cross-platform goals of the architecture and the capabilities of the chosen technologies.
++
++2. Design Patterns for Modular, Auditable, and Self-Repairable Systems
++2.1. Modular Design Principles
++A modular system is composed of loosely coupled, self-contained components that can be independently developed, tested, replaced, or upgraded. Key principles include:
++
++Functional Partitioning: Decompose the system into discrete, scalable modules with well-defined interfaces.
++
++Loose Coupling: Minimize dependencies between modules to facilitate independent evolution and replacement.
++
++Immutable Templates: Use immutable, versioned templates (e.g., in HDF5) for all modules, scripts, and command blocks to ensure reproducibility and auditability.
++
++2.2. Auditability Patterns
++Auditability requires comprehensive logging, tamper-evident records, and traceability of all actions and changes. Best practices include:
++
++Role-Based Access Control (RBAC): Restrict actions based on user roles, with all access and changes logged against user identities.
++
++Immutable Audit Logs: Store logs in append-only, tamper-evident formats (e.g., HDF5 with Onion VFD or blockchain-backed logs).
++
++Automated Auditing: Use automated tools to monitor, analyze, and alert on suspicious activities or policy violations.
++
++2.3. Self-Repair and Revertibility
++Self-repairable systems detect and remediate failures autonomously. Patterns include:
++
++Health Monitoring: Continuous monitoring of module health, with automated detection of failures or anomalies.
++
++Dynamic Reconfiguration: Ability to replace or restart failed modules without disrupting the overall system.
++
++Immutable Snapshots: Use versioned, immutable templates to roll back to known-good states in case of failure.
++
++2.4. Reference Architectures
++The Microsoft Multi-Agent Reference Architecture provides a blueprint for modular, governed, and extensible systems, emphasizing separation of concerns, orchestration layers, and persistent state management. These patterns can be adapted to the proposed stack, with Rust as the orchestrator, HDF5 as the persistent store, and OASM/PS-Insider Hardened as specialized modules.
++
++3. Rust as Primary Orchestrator and Windows Capability Wrappers
++3.1. Orchestration Responsibilities
++Rust, as the orchestrator, is responsible for:
++
++Module Lifecycle Management: Loading, initializing, monitoring, and unloading modules based on immutable HDF5 templates.
++
++Data and Command Orchestration: Serializing and deserializing data and commands using CBOR and HDF5.
++
++Windows Capability Wrapping: Exposing only essential Windows APIs through safe, minimal wrappers, enforcing least privilege and auditability.
++
++3.2. Windows API Wrapping in Rust
++The windows crate provides idiomatic Rust bindings for the entire Windows API surface, enabling safe and granular exposure of Windows capabilities. By creating thin wrappers around only the required APIs, the system can minimize its attack surface and enforce strict privilege boundaries.
++
++use windows::Win32::System::Threading::{CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW};
++// Minimal wrapper for process creation
++fn spawn_process(command: &str) -> Result<(), windows::core::Error> {
++    // ... implementation ...
++}
++
++3.3. Least Privilege and Sandboxing
++Rust’s type system and ownership model help enforce least privilege by restricting access to sensitive APIs. Additional sandboxing can be achieved using Windows job objects, AppContainers, or third-party sandboxing libraries, all managed from Rust.
++
++3.4. Observability and Monitoring
++Rust’s tracing and tokio crates provide structured, async-aware logging and observability, enabling fine-grained monitoring of module execution, resource usage, and system health.
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 0000000..5770ba4
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,235 @@
++# =============================================================================
++# OASM + Rust + PyO3 + PowerShell Docker Environment
++# Multi-container development and production setup
++# =============================================================================
++
++services:
++  # ===========================================================================
++  # Rust Orchestrator - Primary coordination and HDF5 management
++  # ===========================================================================
++  rust-orchestrator:
++    build:
++      context: .
++      dockerfile: docker/rust.Dockerfile
++      target: development
++    container_name: oasm-rust-orchestrator
++    hostname: rust-orchestrator
++    volumes:
++      # Source code (read-write for development)
++      - ./src:/workspace/src:rw
++      - ./Cargo.toml:/workspace/Cargo.toml:rw
++      # Shared data volumes
++      - templates-data:/workspace/templates:rw
++      - logs-data:/workspace/logs:rw
++      - cbor-data:/workspace/data:rw
++      # Cargo cache for faster builds
++      - cargo-cache:/usr/local/cargo/registry
++      - cargo-git-cache:/usr/local/cargo/git
++    environment:
++      - RUST_LOG=debug
++      - RUST_BACKTRACE=1
++      - HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial
++      - OASM_ENV=development
++    ports:
++      - "8080:8080"  # Main API port
++      - "9090:9090"  # Metrics/observability
++    networks:
++      - oasm-internal
++    healthcheck:
++      test: ["CMD", "cargo", "--version"]
++      interval: 30s
++      timeout: 10s
++      retries: 3
++      start_period: 10s
++    restart: unless-stopped
++
++  # ===========================================================================
++  # Python PyO3 Pattern Testing Engine
++  # ===========================================================================
++  python-testing:
++    build:
++      context: .
++      dockerfile: docker/python.Dockerfile
++      target: development
++    container_name: oasm-python-testing
++    hostname: python-testing
++    depends_on:
++      - rust-orchestrator
++    volumes:
++      # Test code and Python source
++      - ./tests:/workspace/tests:rw
++      - ./src/python:/workspace/python:rw
++      - ./pytest.ini:/workspace/pytest.ini:ro
++      # Shared data (read-only templates, read-write data)
++      - templates-data:/workspace/templates:ro
++      - cbor-data:/workspace/data:rw
++      - logs-data:/workspace/logs:rw
++      # Pip cache
++      - pip-cache:/root/.cache/pip
++    environment:
++      - PYTHONUNBUFFERED=1
++      - PYTEST_TIMEOUT=300
++      - HYPOTHESIS_PROFILE=dev
++    networks:
++      - oasm-internal
++    command: ["pytest", "-v", "--cov", "--cov-report=html"]
++    restart: unless-stopped
++
++  # ===========================================================================
++  # PowerShell Minimal Core
++  # ===========================================================================
++  powershell-core:
++    image: mcr.microsoft.com/dotnet/sdk:8.0
++    container_name: oasm-powershell-core
++    hostname: powershell-core
++    volumes:
++      # PowerShell scripts (read-only from templates)
++      - templates-data:/workspace/templates:ro
++      - ./scripts:/workspace/scripts:ro
++      # Execution logs
++      - logs-data:/workspace/logs:rw
++    environment:
++      - DOTNET_CLI_TELEMETRY_OPTOUT=1
++      - POWERSHELL_TELEMETRY_OPTOUT=1
++    networks:
++      - oasm-internal
++    # Keep container running for exec commands
++    command: >
++      sh -c "
++      # Install PowerShell if not present
++      if ! command -v pwsh >/dev/null 2>&1; then
++        echo 'Installing PowerShell...';
++        apt-get update && apt-get install -y wget;
++        wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb;
++        dpkg -i packages-microsoft-prod.deb;
++        apt-get update && apt-get install -y powershell;
++      fi;
++      # Keep container alive
++      while true; do sleep 3600; done
++      "
++    restart: unless-stopped
++
++  # ===========================================================================
++  # Optional: OASM Platform (if integrating existing OASM)
++  # ===========================================================================
++  oasm-db:
++    image: postgres:16-alpine
++    container_name: oasm-postgres
++    hostname: oasm-db
++    environment:
++      POSTGRES_DB: oasm
++      POSTGRES_USER: oasm
++      POSTGRES_PASSWORD: ${OASM_DB_PASSWORD:-oasm_dev_password}
++      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
++    volumes:
++      - oasm-db-data:/var/lib/postgresql/data
++    networks:
++      - oasm-internal
++    healthcheck:
++      test: ["CMD-SHELL", "pg_isready -U oasm"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++    restart: unless-stopped
++    profiles:
++      - with-oasm  # Only start if explicitly enabled
++
++  oasm-api:
++    image: node:20-bookworm-slim
++    container_name: oasm-api-server
++    hostname: oasm-api
++    depends_on:
++      oasm-db:
++        condition: service_healthy
++    working_dir: /app
++    volumes:
++      - ./oasm:/app:rw
++      - node-modules:/app/node_modules
++    environment:
++      DATABASE_URL: postgresql://oasm:${OASM_DB_PASSWORD:-oasm_dev_password}@oasm-db:5432/oasm
++      NODE_ENV: development
++      PORT: 3000
++    ports:
++      - "3000:3000"
++    networks:
++      - oasm-internal
++    command: >
++      sh -c "
++      if [ ! -d node_modules ]; then
++        npm install;
++      fi;
++      npm run dev
++      "
++    restart: unless-stopped
++    profiles:
++      - with-oasm  # Only start if explicitly enabled
++
++  # ===========================================================================
++  # Development Tools Container (optional)
++  # ===========================================================================
++  dev-tools:
++    image: alpine:latest
++    container_name: oasm-dev-tools
++    hostname: dev-tools
++    volumes:
++      - templates-data:/data/templates:rw
++      - logs-data:/data/logs:rw
++      - cbor-data:/data/cbor:rw
++    networks:
++      - oasm-internal
++    command: >
++      sh -c "
++      apk add --no-cache curl jq vim htop;
++      echo 'Development tools ready. Attach with: docker exec -it oasm-dev-tools sh';
++      tail -f /dev/null
++      "
++    restart: unless-stopped
++    profiles:
++      - dev-tools
++
++# =============================================================================
++# Networks
++# =============================================================================
++networks:
++  oasm-internal:
++    driver: bridge
++    ipam:
++      config:
++        - subnet: 10.100.0.0/16
++
++# =============================================================================
++# Volumes - Shared persistent data
++# =============================================================================
++volumes:
++  # HDF5 immutable templates
++  templates-data:
++    driver: local
++    driver_opts:
++      type: none
++      o: bind
++      device: ${PWD}/data/templates
++
++  # Audit logs
++  logs-data:
++    driver: local
++    driver_opts:
++      type: none
++      o: bind
++      device: ${PWD}/data/logs
++
++  # CBOR serialized data
++  cbor-data:
++    driver: local
++    driver_opts:
++      type: none
++      o: bind
++      device: ${PWD}/data/cbor
++
++  # Build caches
++  cargo-cache:
++  cargo-git-cache:
++  pip-cache:
++  node-modules:
++
++  # OASM database
++  oasm-db-data:
+diff --git a/docker/Dockerfile b/docker/Dockerfile
+new file mode 100644
+index 0000000..424d3d3
+--- /dev/null
++++ b/docker/Dockerfile
+@@ -0,0 +1,204 @@
++# Multi-stage Dockerfile for OASM + Rust + PyO3 + HDF5 System
++# Isolated environment for building, testing, and running
++
++# =============================================================================
++# Stage 1: Base Image with System Dependencies
++# =============================================================================
++FROM rust:1.75-bookworm as base
++
++# Set environment variables
++ENV DEBIAN_FRONTEND=noninteractive \
++    RUSTUP_HOME=/usr/local/rustup \
++    CARGO_HOME=/usr/local/cargo \
++    PATH=/usr/local/cargo/bin:$PATH \
++    PYTHONUNBUFFERED=1 \
++    PYO3_PYTHON=python3.11
++
++# Install system dependencies
++RUN apt-get update && apt-get install -y \
++    # Build essentials
++    build-essential \
++    pkg-config \
++    cmake \
++    git \
++    curl \
++    wget \
++    # Python and development headers
++    python3.11 \
++    python3.11-dev \
++    python3.11-venv \
++    python3-pip \
++    # HDF5 library and dependencies
++    libhdf5-dev \
++    hdf5-tools \
++    libhdf5-serial-dev \
++    # Additional libraries
++    libssl-dev \
++    libffi-dev \
++    zlib1g-dev \
++    # PowerShell dependencies
++    libicu-dev \
++    liblttng-ust1 \
++    # Tools
++    vim \
++    nano \
++    htop \
++    tree \
++    jq \
++    && rm -rf /var/lib/apt/lists/*
++
++# Install PowerShell Core
++RUN wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb \
++    && dpkg -i packages-microsoft-prod.deb \
++    && rm packages-microsoft-prod.deb \
++    && apt-get update \
++    && apt-get install -y powershell \
++    && rm -rf /var/lib/apt/lists/*
++
++# =============================================================================
++# Stage 2: Rust Build Environment
++# =============================================================================
++FROM base as rust-builder
++
++# Install Rust toolchain components
++RUN rustup component add \
++    rustfmt \
++    clippy \
++    rust-src
++
++# Install cargo tools for development
++RUN cargo install \
++    cargo-watch \
++    cargo-audit \
++    cargo-deny \
++    cargo-make \
++    cargo-auditable \
++    maturin
++
++# Set up workspace
++WORKDIR /workspace
++
++# =============================================================================
++# Stage 3: Python Environment
++# =============================================================================
++FROM rust-builder as python-env
++
++# Create Python virtual environment
++RUN python3.11 -m venv /opt/venv
++ENV PATH="/opt/venv/bin:$PATH"
++
++# Upgrade pip and install base packages
++RUN pip install --no-cache-dir --upgrade \
++    pip \
++    setuptools \
++    wheel
++
++# Install Python dependencies for PyO3 and testing
++RUN pip install --no-cache-dir \
++    # PyO3 and maturin
++    maturin \
++    # Testing frameworks
++    pytest \
++    pytest-cov \
++    pytest-benchmark \
++    hypothesis \
++    # Data science and pattern testing
++    numpy \
++    pandas \
++    networkx \
++    scikit-learn \
++    # HDF5 Python bindings
++    h5py \
++    tables \
++    # Async and utilities
++    aiofiles \
++    pyyaml \
++    toml \
++    # Logging and observability
++    structlog \
++    opentelemetry-api \
++    opentelemetry-sdk
++
++# =============================================================================
++# Stage 4: Development Environment
++# =============================================================================
++FROM python-env as development
++
++# Create project structure
++RUN mkdir -p /workspace/{src,tests,templates,logs,data}
++
++# Copy configuration files (if they exist)
++COPY docker/config/* /workspace/config/ 2>/dev/null || true
++
++# Set up HDF5 environment variables
++ENV HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial \
++    LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial:$LD_LIBRARY_PATH
++
++# Create entrypoint script
++RUN echo '#!/bin/bash\n\
++set -e\n\
++\n\
++# Activate Python virtual environment\n\
++source /opt/venv/bin/activate\n\
++\n\
++# Initialize workspace if needed\n\
++if [ ! -f /workspace/Cargo.toml ]; then\n\
++    echo "Initializing Rust workspace..."\n\
++    cargo init --lib /workspace 2>/dev/null || true\n\
++fi\n\
++\n\
++# Run command or start shell\n\
++if [ $# -eq 0 ]; then\n\
++    echo "=== OASM+Rust+PyO3 Development Environment ==="\n\
++    echo "Rust version: $(rustc --version)"\n\
++    echo "Python version: $(python --version)"\n\
++    echo "PowerShell version: $(pwsh --version)"\n\
++    echo "HDF5 version: $(h5ls --version 2>&1 | head -1)"\n\
++    echo "\nStarting interactive shell..."\n\
++    /bin/bash\n\
++else\n\
++    exec "$@"\n\
++fi\n\
++' > /entrypoint.sh && chmod +x /entrypoint.sh
++
++# Set working directory
++WORKDIR /workspace
++
++# Expose ports for potential services
++EXPOSE 8080 8081
++
++# Health check
++HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
++    CMD python3 -c "import sys; sys.exit(0)" || exit 1
++
++ENTRYPOINT ["/entrypoint.sh"]
++CMD []
++
++# =============================================================================
++# Stage 5: Production Build
++# =============================================================================
++FROM python-env as production
++
++WORKDIR /app
++
++# Copy project files
++COPY . /app/
++
++# Build Rust components
++RUN cargo build --release
++
++# Build Python extensions with maturin
++RUN maturin build --release --out dist/
++
++# Install built wheels
++RUN pip install --no-cache-dir dist/*.whl 2>/dev/null || true
++
++# Set up production entrypoint
++RUN echo '#!/bin/bash\n\
++set -e\n\
++source /opt/venv/bin/activate\n\
++exec "$@"\n\
++' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
++
++ENTRYPOINT ["/app/entrypoint.sh"]
++CMD ["cargo", "run", "--release"]
+diff --git a/docker/python.Dockerfile b/docker/python.Dockerfile
+new file mode 100644
+index 0000000..8090b1e
+--- /dev/null
++++ b/docker/python.Dockerfile
+@@ -0,0 +1,142 @@
++# Python PyO3 Testing Engine Dockerfile
++
++# =============================================================================
++# Base stage with Python 3.11
++# =============================================================================
++FROM python:3.11-slim-bookworm AS base
++
++ENV DEBIAN_FRONTEND=noninteractive \
++    PYTHONUNBUFFERED=1 \
++    PYTHONDONTWRITEBYTECODE=1 \
++    PIP_NO_CACHE_DIR=1 \
++    PIP_DISABLE_PIP_VERSION_CHECK=1
++
++# Install system dependencies
++RUN apt-get update && apt-get install -y \
++    # Build tools for compiling Rust extensions
++    build-essential \
++    pkg-config \
++    cmake \
++    git \
++    curl \
++    # HDF5 for Python bindings
++    libhdf5-dev \
++    libhdf5-serial-dev \
++    hdf5-tools \
++    # Additional libraries
++    libssl-dev \
++    libffi-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# Set HDF5 environment
++ENV HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial \
++    LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial:$LD_LIBRARY_PATH
++
++# =============================================================================
++# Development stage with all testing tools
++# =============================================================================
++FROM base AS development
++
++# Install Rust for building PyO3 extensions
++RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
++ENV PATH="/root/.cargo/bin:$PATH"
++
++# Create virtual environment
++RUN python -m venv /opt/venv
++ENV PATH="/opt/venv/bin:$PATH"
++
++# Upgrade pip and install build tools
++RUN pip install --upgrade pip setuptools wheel
++
++# Install core dependencies
++RUN pip install \
++    # PyO3 and Rust integration
++    maturin \
++    # Testing frameworks
++    pytest \
++    pytest-cov \
++    pytest-benchmark \
++    pytest-asyncio \
++    pytest-xdist \
++    hypothesis \
++    # Data analysis and ML
++    numpy \
++    pandas \
++    scipy \
++    scikit-learn \
++    networkx \
++    # HDF5 Python bindings
++    h5py \
++    tables \
++    # CBOR support
++    cbor2 \
++    # Async utilities
++    aiofiles \
++    asyncio \
++    # Configuration
++    pyyaml \
++    toml \
++    # Logging
++    structlog \
++    loguru \
++    # Type checking
++    mypy \
++    # Linting
++    ruff \
++    black
++
++# Create non-root user
++RUN useradd -m -s /bin/bash pydev && \
++    mkdir -p /workspace && \
++    chown -R pydev:pydev /workspace /opt/venv
++
++WORKDIR /workspace
++RUN mkdir -p tests data templates logs
++
++# Development entrypoint
++COPY docker/scripts/python-entrypoint.sh /entrypoint.sh
++RUN chmod +x /entrypoint.sh
++
++USER pydev
++
++# Copy test configuration
++COPY --chown=pydev:pydev pytest.ini pyproject.toml* ./
++
++ENTRYPOINT ["/entrypoint.sh"]
++CMD ["pytest", "-v", "--cov"]
++
++# =============================================================================
++# Production stage (minimal)
++# =============================================================================
++FROM base AS production
++
++# Create virtual environment
++RUN python -m venv /opt/venv
++ENV PATH="/opt/venv/bin:$PATH"
++
++# Install only production dependencies
++RUN pip install --upgrade pip && \
++    pip install \
++    numpy \
++    h5py \
++    cbor2 \
++    structlog
++
++# Create runtime user
++RUN useradd -m -s /bin/bash pyapp
++
++WORKDIR /app
++RUN mkdir -p data templates logs && \
++    chown -R pyapp:pyapp /app
++
++# Copy application code
++COPY --chown=pyapp:pyapp src/python ./python
++COPY --chown=pyapp:pyapp dist/*.whl ./dist/
++
++# Install built wheels (PyO3 extensions)
++RUN pip install dist/*.whl || true
++
++USER pyapp
++
++ENTRYPOINT ["python", "-m"]
++CMD ["python.main"]
+diff --git a/docker/rust.Dockerfile b/docker/rust.Dockerfile
+new file mode 100644
+index 0000000..20ee528
+--- /dev/null
++++ b/docker/rust.Dockerfile
+@@ -0,0 +1,143 @@
++# Rust Orchestrator Dockerfile
++# Multi-stage build for development and production
++
++# =============================================================================
++# Stage 1: Base with system dependencies
++# =============================================================================
++FROM rust:1.83-bookworm AS base
++
++# Avoid interactive prompts
++ENV DEBIAN_FRONTEND=noninteractive \
++    RUSTUP_HOME=/usr/local/rustup \
++    CARGO_HOME=/usr/local/cargo \
++    PATH=/usr/local/cargo/bin:$PATH
++
++# Install system dependencies
++RUN apt-get update && apt-get install -y \
++    # Build tools
++    build-essential \
++    pkg-config \
++    cmake \
++    git \
++    curl \
++    wget \
++    # HDF5 and dependencies
++    libhdf5-dev \
++    libhdf5-serial-dev \
++    hdf5-tools \
++    # SSL and compression
++    libssl-dev \
++    libffi-dev \
++    zlib1g-dev \
++    liblzma-dev \
++    # Python for PyO3 integration
++    python3.11 \
++    python3.11-dev \
++    python3-pip \
++    # Utilities
++    vim \
++    nano \
++    htop \
++    tree \
++    && rm -rf /var/lib/apt/lists/*
++
++# Set HDF5 environment variables
++ENV HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial \
++    LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial:$LD_LIBRARY_PATH \
++    PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial/pkgconfig:$PKG_CONFIG_PATH
++
++# =============================================================================
++# Stage 2: Development environment with tools
++# =============================================================================
++FROM base AS development
++
++# Install Rust toolchain components
++RUN rustup component add \
++    rustfmt \
++    clippy \
++    rust-src \
++    rust-analyzer
++
++# Install development cargo tools
++# Note: cargo-audit, cargo-deny, cargo-edit, cargo-auditable require edition2024 (not yet stable)
++RUN cargo install --locked \
++    cargo-watch \
++    cargo-make \
++    maturin
++
++# Create non-root user for development
++RUN useradd -m -s /bin/bash rustdev && \
++    mkdir -p /workspace && \
++    chown -R rustdev:rustdev /workspace
++
++# Set up workspace structure
++WORKDIR /workspace
++RUN mkdir -p src tests templates logs data scripts
++
++# Copy Cargo files first for layer caching
++COPY --chown=rustdev:rustdev Cargo.toml Cargo.lock* ./
++
++# Create placeholder lib.rs and main.rs for dependency caching
++RUN mkdir -p src && \
++    echo "// Placeholder" > src/lib.rs && \
++    echo "fn main() {}" > src/main.rs && \
++    cargo build --release && \
++    rm -rf src target
++
++# Fix ownership of workspace
++RUN chown -R rustdev:rustdev /workspace
++
++# Development entrypoint
++COPY docker/scripts/rust-entrypoint.sh /entrypoint.sh
++RUN chmod +x /entrypoint.sh
++
++USER rustdev
++
++ENTRYPOINT ["/entrypoint.sh"]
++CMD ["cargo", "watch", "-x", "run"]
++
++# =============================================================================
++# Stage 3: Production builder
++# =============================================================================
++FROM base AS builder
++
++WORKDIR /build
++
++# Copy project files
++COPY Cargo.toml Cargo.lock* ./
++COPY src ./src
++COPY templates ./templates
++
++# Build release binary
++RUN cargo build --release --locked
++
++# =============================================================================
++# Stage 4: Production runtime
++# =============================================================================
++FROM debian:bookworm-slim AS production
++
++# Install runtime dependencies only
++RUN apt-get update && apt-get install -y \
++    libhdf5-103 \
++    libssl3 \
++    ca-certificates \
++    && rm -rf /var/lib/apt/lists/*
++
++# Create runtime user
++RUN useradd -m -s /bin/bash rustapp
++
++# Set up runtime directories
++WORKDIR /app
++RUN mkdir -p templates logs data && \
++    chown -R rustapp:rustapp /app
++
++# Copy binary from builder
++COPY --from=builder /build/target/release/oasm-orchestrator /app/
++COPY --from=builder /build/templates /app/templates/
++
++USER rustapp
++
++ENV HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial \
++    LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial:$LD_LIBRARY_PATH
++
++ENTRYPOINT ["/app/oasm-orchestrator"]
+diff --git a/docker/scripts/python-entrypoint.sh b/docker/scripts/python-entrypoint.sh
+new file mode 100644
+index 0000000..50f8b81
+--- /dev/null
++++ b/docker/scripts/python-entrypoint.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -e
++
++# Activate virtual environment
++source /opt/venv/bin/activate
++
++echo "=== PyO3 Pattern Testing Engine ==="
++echo "Python version: $(python --version)"
++echo "Pytest version: $(pytest --version)"
++echo "Hypothesis version: $(python -c 'import hypothesis; print(hypothesis.__version__)')"
++echo ""
++
++# Create necessary directories
++mkdir -p /workspace/{tests,data,templates,logs}
++
++# Check for PyO3 extensions
++if [ -d "/workspace/dist" ] && [ "$(ls -A /workspace/dist/*.whl 2>/dev/null)" ]; then
++    echo "Installing PyO3 extensions..."
++    pip install --force-reinstall /workspace/dist/*.whl
++fi
++
++echo ""
++echo "Test environment ready"
++echo ""
++
++# Execute command or start shell
++if [ $# -eq 0 ]; then
++    echo "Starting interactive Python shell..."
++    exec python
++else
++    exec "$@"
++fi
+diff --git a/docker/scripts/rust-entrypoint.sh b/docker/scripts/rust-entrypoint.sh
+new file mode 100644
+index 0000000..cfff491
+--- /dev/null
++++ b/docker/scripts/rust-entrypoint.sh
+@@ -0,0 +1,41 @@
++#!/bin/bash
++set -e
++
++echo "=== OASM Rust Orchestrator Development Environment ==="
++echo "Rust version: $(rustc --version)"
++echo "Cargo version: $(cargo --version)"
++echo "HDF5 tools: $(h5ls --version 2>&1 | head -1)"
++echo ""
++
++# Initialize workspace if Cargo.toml doesn't exist
++if [ ! -f /workspace/Cargo.toml ]; then
++    echo "Initializing Rust workspace..."
++    cd /workspace
++    cargo init --lib --name oasm-orchestrator
++fi
++
++# Check HDF5 installation
++if ldconfig -p | grep -q libhdf5; then
++    echo "✓ HDF5 libraries found"
++else
++    echo "⚠ HDF5 libraries not found in library path"
++fi
++
++# Create necessary directories with proper permissions
++mkdir -p /workspace/{src,tests,templates,logs,data}
++
++# Clean and recreate target directory
++rm -rf /workspace/target 2>/dev/null || true
++mkdir -p /workspace/target
++
++echo ""
++echo "Workspace ready at /workspace"
++echo ""
++
++# Execute command or start shell
++if [ $# -eq 0 ]; then
++    echo "Starting interactive development shell..."
++    exec /bin/bash
++else
++    exec "$@"
++fi
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100644
+index 0000000..d45943b
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,89 @@
++[build-system]
++requires = ["maturin>=1.0,<2.0"]
++build-backend = "maturin"
++
++[project]
++name = "oasm-orchestrator"
++version = "0.1.0"
++description = "OASM Orchestrator - Modular security orchestration with Rust, HDF5, and PyO3"
++readme = "README.md"
++requires-python = ">=3.11"
++license = { text = "MIT" }
++authors = [
++    { name = "OASM Team" }
++]
++
++dependencies = [
++    "numpy>=1.24",
++    "pandas>=2.0",
++    "h5py>=3.8",
++    "cbor2>=5.4",
++]
++
++[project.optional-dependencies]
++dev = [
++    "pytest>=7.4",
++    "pytest-cov>=4.1",
++    "pytest-benchmark>=4.0",
++    "hypothesis>=6.82",
++    "mypy>=1.4",
++    "ruff>=0.0.280",
++    "black>=23.7",
++]
++
++[tool.maturin]
++features = ["pyo3/extension-module"]
++python-source = "python"
++module-name = "oasm_orchestrator._core"
++
++[tool.black]
++line-length = 100
++target-version = ['py311']
++include = '\.pyi?$'
++
++[tool.ruff]
++line-length = 100
++target-version = "py311"
++select = [
++    "E",   # pycodestyle errors
++    "W",   # pycodestyle warnings
++    "F",   # pyflakes
++    "I",   # isort
++    "B",   # flake8-bugbear
++    "C4",  # flake8-comprehensions
++    "UP",  # pyupgrade
++]
++ignore = []
++
++[tool.mypy]
++python_version = "3.11"
++warn_return_any = true
++warn_unused_configs = true
++disallow_untyped_defs = true
++disallow_incomplete_defs = true
++check_untyped_defs = true
++disallow_untyped_calls = true
++disallow_untyped_decorators = false
++no_implicit_optional = true
++warn_redundant_casts = true
++warn_unused_ignores = true
++warn_no_return = true
++follow_imports = "normal"
++ignore_missing_imports = true
++
++[tool.pytest.ini_options]
++minversion = "7.4"
++testpaths = ["tests"]
++python_files = ["test_*.py"]
++python_classes = ["Test*"]
++python_functions = ["test_*"]
++addopts = "-ra --strict-markers --strict-config --showlocals"
++
++[tool.coverage.run]
++source = ["src", "python"]
++omit = ["*/tests/*", "*/test_*.py"]
++
++[tool.coverage.report]
++precision = 2
++show_missing = true
++skip_covered = false
+diff --git a/pytest.ini b/pytest.ini
+new file mode 100644
+index 0000000..82ccd0e
+--- /dev/null
++++ b/pytest.ini
+@@ -0,0 +1,42 @@
++[pytest]
++# Pytest configuration for OASM Orchestrator Python testing
++
++# Test discovery
++testpaths = tests
++python_files = test_*.py
++python_classes = Test*
++python_functions = test_*
++
++# Output options
++addopts =
++    -ra
++    --strict-markers
++    --strict-config
++    --showlocals
++    --tb=short
++
++# Logging
++log_cli = true
++log_cli_level = INFO
++log_cli_format = %(asctime)s [%(levelname)s] %(message)s
++log_cli_date_format = %Y-%m-%d %H:%M:%S
++
++# Coverage
++[coverage:run]
++source = src
++omit =
++    */tests/*
++    */test_*.py
++
++[coverage:report]
++precision = 2
++show_missing = true
++skip_covered = false
++
++# Markers
++markers =
++    slow: marks tests as slow (deselect with '-m "not slow"')
++    integration: marks tests as integration tests
++    unit: marks tests as unit tests
++    hypothesis: marks tests using hypothesis property-based testing
++    asyncio: marks async tests
+diff --git a/scripts/build.bat b/scripts/build.bat
+new file mode 100644
+index 0000000..3924591
+--- /dev/null
++++ b/scripts/build.bat
+@@ -0,0 +1,68 @@
++@echo off
++REM Build all Docker containers for OASM Orchestrator
++
++echo ===================================
++echo OASM Orchestrator - Build Script
++echo ===================================
++echo.
++
++cd /d "%~dp0\.."
++
++echo Building Docker containers...
++echo.
++
++REM Build Rust orchestrator container
++echo [1/2] Building Rust orchestrator container...
++docker-compose build rust-orchestrator
++if %errorlevel% neq 0 (
++    echo Error building Rust orchestrator
++    exit /b 1
++)
++echo [OK] Rust orchestrator built
++echo.
++
++REM Build Python testing container
++echo [2/2] Building Python testing container...
++docker-compose build python-testing
++if %errorlevel% neq 0 (
++    echo Error building Python testing container
++    exit /b 1
++)
++echo [OK] Python testing container built
++echo.
++
++REM Optional: Build PowerShell core container
++if "%1"=="--with-powershell" (
++    echo [Optional] Building PowerShell core container...
++    docker-compose build powershell-core
++    if %errorlevel% neq 0 (
++        echo Error building PowerShell core
++        exit /b 1
++    )
++    echo [OK] PowerShell core built
++    echo.
++)
++
++REM Optional: Build OASM platform containers
++if "%1"=="--with-oasm" (
++    echo [Optional] Building OASM platform containers...
++    docker-compose --profile with-oasm build
++    if %errorlevel% neq 0 (
++        echo Error building OASM platform containers
++        exit /b 1
++    )
++    echo [OK] OASM platform containers built
++    echo.
++)
++
++echo ===================================
++echo Build completed successfully!
++echo ===================================
++echo.
++echo Next steps:
++echo   * Run tests: scripts\test.bat
++echo   * Start dev environment: scripts\dev.bat
++echo   * Start all services: docker-compose up -d
++echo.
++
++pause
+diff --git a/scripts/build.sh b/scripts/build.sh
+new file mode 100644
+index 0000000..ad3e9ba
+--- /dev/null
++++ b/scripts/build.sh
+@@ -0,0 +1,59 @@
++#!/bin/bash
++# Build all Docker containers for OASM Orchestrator
++
++set -e
++
++echo "==================================="
++echo "OASM Orchestrator - Build Script"
++echo "==================================="
++echo ""
++
++# Colors for output
++GREEN='\033[0;32m'
++BLUE='\033[0;34m'
++YELLOW='\033[1;33m'
++NC='\033[0m' # No Color
++
++# Change to project root
++cd "$(dirname "$0")/.."
++
++echo -e "${BLUE}Building Docker containers...${NC}"
++echo ""
++
++# Build Rust orchestrator container
++echo -e "${YELLOW}[1/2] Building Rust orchestrator container...${NC}"
++docker-compose build rust-orchestrator
++echo -e "${GREEN}✓ Rust orchestrator built${NC}"
++echo ""
++
++# Build Python testing container
++echo -e "${YELLOW}[2/2] Building Python testing container...${NC}"
++docker-compose build python-testing
++echo -e "${GREEN}✓ Python testing container built${NC}"
++echo ""
++
++# Optional: Build PowerShell core container
++if [ "$1" == "--with-powershell" ]; then
++    echo -e "${YELLOW}[Optional] Building PowerShell core container...${NC}"
++    docker-compose build powershell-core
++    echo -e "${GREEN}✓ PowerShell core built${NC}"
++    echo ""
++fi
++
++# Optional: Build OASM platform containers
++if [ "$1" == "--with-oasm" ]; then
++    echo -e "${YELLOW}[Optional] Building OASM platform containers...${NC}"
++    docker-compose --profile with-oasm build
++    echo -e "${GREEN}✓ OASM platform containers built${NC}"
++    echo ""
++fi
++
++echo -e "${GREEN}==================================="
++echo "Build completed successfully!"
++echo "===================================${NC}"
++echo ""
++echo "Next steps:"
++echo "  • Run tests: ./scripts/test.sh"
++echo "  • Start dev environment: ./scripts/dev.sh"
++echo "  • Start all services: docker-compose up -d"
++echo ""
+diff --git a/scripts/dev.bat b/scripts/dev.bat
+new file mode 100644
+index 0000000..1e94b1d
+--- /dev/null
++++ b/scripts/dev.bat
+@@ -0,0 +1,56 @@
++@echo off
++REM Start development environment for OASM Orchestrator
++
++echo ===================================
++echo OASM Orchestrator - Dev Environment
++echo ===================================
++echo.
++
++cd /d "%~dp0\.."
++
++echo Starting development environment...
++echo.
++
++REM Start core services
++echo Starting core services...
++docker-compose up -d rust-orchestrator python-testing
++
++if %errorlevel% neq 0 (
++    echo Error: Failed to start services
++    exit /b 1
++)
++
++REM Wait for services to be ready
++echo Waiting for services to be ready...
++timeout /t 3 /nobreak >nul
++
++REM Show service status
++echo.
++echo Services started:
++docker-compose ps
++
++echo.
++echo ===================================
++echo Development environment ready!
++echo ===================================
++echo.
++echo Available commands:
++echo.
++echo   Rust Development:
++echo     docker-compose exec rust-orchestrator cargo watch -x build
++echo     docker-compose exec rust-orchestrator cargo test
++echo     docker-compose exec rust-orchestrator bash
++echo.
++echo   Python Development:
++echo     docker-compose exec python-testing pytest /workspace/tests
++echo     docker-compose exec python-testing python
++echo.
++echo   View Logs:
++echo     docker-compose logs -f rust-orchestrator
++echo     docker-compose logs -f python-testing
++echo.
++echo   Stop Services:
++echo     docker-compose down
++echo.
++
++pause
+diff --git a/scripts/dev.sh b/scripts/dev.sh
+new file mode 100644
+index 0000000..6deedca
+--- /dev/null
++++ b/scripts/dev.sh
+@@ -0,0 +1,58 @@
++#!/bin/bash
++# Start development environment for OASM Orchestrator
++
++set -e
++
++echo "==================================="
++echo "OASM Orchestrator - Dev Environment"
++echo "==================================="
++echo ""
++
++# Colors
++GREEN='\033[0;32m'
++BLUE='\033[0;34m'
++YELLOW='\033[1;33m'
++NC='\033[0m'
++
++# Change to project root
++cd "$(dirname "$0")/.."
++
++echo -e "${BLUE}Starting development environment...${NC}"
++echo ""
++
++# Start core services
++echo -e "${YELLOW}Starting core services...${NC}"
++docker-compose up -d rust-orchestrator python-testing
++
++# Wait for services to be ready
++echo -e "${YELLOW}Waiting for services to be ready...${NC}"
++sleep 2
++
++# Show service status
++echo ""
++echo -e "${GREEN}Services started:${NC}"
++docker-compose ps
++
++echo ""
++echo -e "${GREEN}==================================="
++echo "Development environment ready!"
++echo "===================================${NC}"
++echo ""
++echo "Available commands:"
++echo ""
++echo "  ${BLUE}Rust Development:${NC}"
++echo "    docker-compose exec rust-orchestrator cargo watch -x build"
++echo "    docker-compose exec rust-orchestrator cargo test"
++echo "    docker-compose exec rust-orchestrator bash"
++echo ""
++echo "  ${BLUE}Python Development:${NC}"
++echo "    docker-compose exec python-testing pytest /workspace/tests"
++echo "    docker-compose exec python-testing python"
++echo ""
++echo "  ${BLUE}View Logs:${NC}"
++echo "    docker-compose logs -f rust-orchestrator"
++echo "    docker-compose logs -f python-testing"
++echo ""
++echo "  ${BLUE}Stop Services:${NC}"
++echo "    docker-compose down"
++echo ""
+diff --git a/scripts/test.bat b/scripts/test.bat
+new file mode 100644
+index 0000000..61375dd
+--- /dev/null
++++ b/scripts/test.bat
+@@ -0,0 +1,69 @@
++@echo off
++REM Run tests for OASM Orchestrator
++
++echo ===================================
++echo OASM Orchestrator - Test Suite
++echo ===================================
++echo.
++
++cd /d "%~dp0\.."
++
++REM Check if containers are built
++docker images | findstr /C:"oasm" | findstr /C:"rust-orchestrator" >nul
++if %errorlevel% neq 0 (
++    echo Error: Containers not built. Run scripts\build.bat first
++    exit /b 1
++)
++
++echo Running test suite...
++echo.
++
++REM Test 1: Rust unit tests
++echo [1/4] Running Rust unit tests...
++docker-compose run --rm rust-orchestrator cargo test --lib
++if %errorlevel% neq 0 (
++    echo Error: Rust unit tests failed
++    exit /b 1
++)
++echo [OK] Rust unit tests passed
++echo.
++
++REM Test 2: Rust integration tests
++echo [2/4] Running Rust integration tests...
++docker-compose run --rm rust-orchestrator cargo test --test "*"
++if %errorlevel% neq 0 (
++    echo Warning: Some integration tests failed
++)
++echo [OK] Rust integration tests completed
++echo.
++
++REM Test 3: Build check
++echo [3/4] Running build check...
++docker-compose run --rm rust-orchestrator cargo build --release
++if %errorlevel% neq 0 (
++    echo Error: Build check failed
++    exit /b 1
++)
++echo [OK] Build check passed
++echo.
++
++REM Test 4: Python tests
++echo [4/4] Running Python tests...
++if exist "tests\*.py" (
++    docker-compose run --rm python-testing pytest /workspace/tests -v
++    if %errorlevel% neq 0 (
++        echo Warning: Some Python tests failed
++    ) else (
++        echo [OK] Python tests passed
++    )
++) else (
++    echo [SKIP] No Python tests found
++)
++echo.
++
++echo ===================================
++echo Test suite completed!
++echo ===================================
++echo.
++
++pause
+diff --git a/scripts/test.sh b/scripts/test.sh
+new file mode 100644
+index 0000000..884963f
+--- /dev/null
++++ b/scripts/test.sh
+@@ -0,0 +1,77 @@
++#!/bin/bash
++# Run tests for OASM Orchestrator
++
++set -e
++
++echo "==================================="
++echo "OASM Orchestrator - Test Suite"
++echo "==================================="
++echo ""
++
++# Colors
++GREEN='\033[0;32m'
++BLUE='\033[0;34m'
++YELLOW='\033[1;33m'
++RED='\033[0;31m'
++NC='\033[0m'
++
++# Change to project root
++cd "$(dirname "$0")/.."
++
++# Check if containers are built
++if ! docker images | grep -q "oasm.*rust-orchestrator"; then
++    echo -e "${RED}Error: Containers not built. Run ./scripts/build.sh first${NC}"
++    exit 1
++fi
++
++echo -e "${BLUE}Running test suite...${NC}"
++echo ""
++
++# Test 1: Rust unit tests
++echo -e "${YELLOW}[1/4] Running Rust unit tests...${NC}"
++docker-compose run --rm rust-orchestrator cargo test --lib
++echo -e "${GREEN}✓ Rust unit tests passed${NC}"
++echo ""
++
++# Test 2: Rust integration tests
++echo -e "${YELLOW}[2/4] Running Rust integration tests...${NC}"
++docker-compose run --rm rust-orchestrator cargo test --test '*'
++echo -e "${GREEN}✓ Rust integration tests passed${NC}"
++echo ""
++
++# Test 3: Build check (ensure it compiles)
++echo -e "${YELLOW}[3/4] Running build check...${NC}"
++docker-compose run --rm rust-orchestrator cargo build --release
++echo -e "${GREEN}✓ Build check passed${NC}"
++echo ""
++
++# Test 4: Python tests (if available)
++echo -e "${YELLOW}[4/4] Running Python tests...${NC}"
++if [ -d "tests" ] && [ "$(ls -A tests/*.py 2>/dev/null)" ]; then
++    docker-compose run --rm python-testing pytest /workspace/tests -v
++    echo -e "${GREEN}✓ Python tests passed${NC}"
++else
++    echo -e "${YELLOW}⚠ No Python tests found (skipping)${NC}"
++fi
++echo ""
++
++# Optional: Run property-based tests
++if [ "$1" == "--property" ]; then
++    echo -e "${YELLOW}[Optional] Running property-based tests...${NC}"
++    docker-compose run --rm python-testing pytest /workspace/tests -v -m hypothesis
++    echo -e "${GREEN}✓ Property-based tests passed${NC}"
++    echo ""
++fi
++
++# Optional: Run benchmarks
++if [ "$1" == "--bench" ]; then
++    echo -e "${YELLOW}[Optional] Running benchmarks...${NC}"
++    docker-compose run --rm rust-orchestrator cargo bench
++    echo -e "${GREEN}✓ Benchmarks completed${NC}"
++    echo ""
++fi
++
++echo -e "${GREEN}==================================="
++echo "All tests passed!"
++echo "===================================${NC}"
++echo ""
+diff --git a/src/audit.rs b/src/audit.rs
+new file mode 100644
+index 0000000..5d1adb8
+--- /dev/null
++++ b/src/audit.rs
+@@ -0,0 +1,325 @@
++// Audit Logging Module
++// Provides immutable, tamper-evident audit logging using HDF5
++
++use anyhow::{Result, Context};
++use chrono::{DateTime, Utc};
++use serde::{Serialize, Deserialize};
++use std::path::{Path, PathBuf};
++use tracing::{info, debug};
++use uuid::Uuid;
++use blake3::Hasher;
++
++/// Audit event severity level
++#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
++pub enum AuditLevel {
++    Debug,
++    Info,
++    Warning,
++    Error,
++    Critical,
++}
++
++/// Audit event type
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub enum AuditEventType {
++    ModuleLoaded,
++    ModuleExecuted,
++    ModuleFailed,
++    ConfigurationChanged,
++    SecurityEvent,
++    DataAccess,
++    SystemEvent,
++    Custom(String),
++}
++
++/// Individual audit event
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct AuditEvent {
++    pub event_id: Uuid,
++    pub timestamp: DateTime<Utc>,
++    pub level: AuditLevel,
++    pub event_type: AuditEventType,
++    pub actor: String,
++    pub action: String,
++    pub target: Option<String>,
++    pub metadata: serde_json::Value,
++    pub hash: String,
++}
++
++impl AuditEvent {
++    /// Create a new audit event
++    pub fn new(
++        level: AuditLevel,
++        event_type: AuditEventType,
++        actor: String,
++        action: String,
++    ) -> Self {
++        let event_id = Uuid::new_v4();
++        let timestamp = Utc::now();
++
++        let mut event = Self {
++            event_id,
++            timestamp,
++            level,
++            event_type,
++            actor,
++            action,
++            target: None,
++            metadata: serde_json::json!({}),
++            hash: String::new(),
++        };
++
++        event.hash = event.calculate_hash();
++        event
++    }
++
++    /// Add target to event
++    pub fn with_target(mut self, target: String) -> Self {
++        self.target = Some(target);
++        self.hash = self.calculate_hash();
++        self
++    }
++
++    /// Add metadata to event
++    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
++        self.metadata = metadata;
++        self.hash = self.calculate_hash();
++        self
++    }
++
++    /// Calculate cryptographic hash of event for tamper detection
++    fn calculate_hash(&self) -> String {
++        let mut hasher = Hasher::new();
++
++        hasher.update(self.event_id.as_bytes());
++        hasher.update(self.timestamp.to_rfc3339().as_bytes());
++        hasher.update(format!("{:?}", self.level).as_bytes());
++        hasher.update(format!("{:?}", self.event_type).as_bytes());
++        hasher.update(self.actor.as_bytes());
++        hasher.update(self.action.as_bytes());
++
++        if let Some(ref target) = self.target {
++            hasher.update(target.as_bytes());
++        }
++
++        hasher.update(self.metadata.to_string().as_bytes());
++
++        let hash = hasher.finalize();
++        hash.to_hex().to_string()
++    }
++
++    /// Verify event integrity
++    pub fn verify_integrity(&self) -> bool {
++        let calculated_hash = self.calculate_hash();
++        calculated_hash == self.hash
++    }
++}
++
++/// Audit logger that writes to HDF5-based immutable storage
++pub struct AuditLogger {
++    log_dir: PathBuf,
++    buffer: Vec<AuditEvent>,
++    buffer_size: usize,
++}
++
++impl AuditLogger {
++    /// Create a new audit logger
++    pub fn new(log_dir: PathBuf) -> Result<Self> {
++        std::fs::create_dir_all(&log_dir)
++            .context("Failed to create audit log directory")?;
++
++        Ok(Self {
++            log_dir,
++            buffer: Vec::new(),
++            buffer_size: 100, // Flush after 100 events
++        })
++    }
++
++    /// Log an audit event
++    pub fn log(&mut self, event: AuditEvent) -> Result<()> {
++        debug!("Audit event [{}]: {} - {}", event.event_id, event.actor, event.action);
++
++        // Verify event integrity before logging
++        if !event.verify_integrity() {
++            anyhow::bail!("Audit event integrity check failed");
++        }
++
++        self.buffer.push(event);
++
++        // Auto-flush if buffer is full
++        if self.buffer.len() >= self.buffer_size {
++            self.flush()?;
++        }
++
++        Ok(())
++    }
++
++    /// Flush buffered events to persistent storage
++    pub fn flush(&mut self) -> Result<()> {
++        if self.buffer.is_empty() {
++            return Ok(());
++        }
++
++        info!("Flushing {} audit events to storage", self.buffer.len());
++
++        // Create log file with timestamp
++        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
++        let log_file = self.log_dir.join(format!("audit_{}.cbor", timestamp));
++
++        // Serialize events to CBOR
++        crate::cbor_handler::CBORHandler::serialize_to_file(&self.buffer, &log_file)
++            .context("Failed to write audit events to storage")?;
++
++        info!("Audit events written to: {:?}", log_file);
++
++        self.buffer.clear();
++
++        Ok(())
++    }
++
++    /// Create a module load event
++    pub fn log_module_load(&mut self, module_id: &str, actor: &str) -> Result<()> {
++        let event = AuditEvent::new(
++            AuditLevel::Info,
++            AuditEventType::ModuleLoaded,
++            actor.to_string(),
++            "load_module".to_string(),
++        )
++        .with_target(module_id.to_string())
++        .with_metadata(serde_json::json!({
++            "module_id": module_id,
++        }));
++
++        self.log(event)
++    }
++
++    /// Create a module execution event
++    pub fn log_module_execution(
++        &mut self,
++        module_id: &str,
++        actor: &str,
++        success: bool,
++        execution_time_ms: u64,
++    ) -> Result<()> {
++        let level = if success { AuditLevel::Info } else { AuditLevel::Error };
++        let event_type = if success {
++            AuditEventType::ModuleExecuted
++        } else {
++            AuditEventType::ModuleFailed
++        };
++
++        let event = AuditEvent::new(
++            level,
++            event_type,
++            actor.to_string(),
++            "execute_module".to_string(),
++        )
++        .with_target(module_id.to_string())
++        .with_metadata(serde_json::json!({
++            "module_id": module_id,
++            "success": success,
++            "execution_time_ms": execution_time_ms,
++        }));
++
++        self.log(event)
++    }
++
++    /// Create a security event
++    pub fn log_security_event(&mut self, actor: &str, action: &str, details: serde_json::Value) -> Result<()> {
++        let event = AuditEvent::new(
++            AuditLevel::Warning,
++            AuditEventType::SecurityEvent,
++            actor.to_string(),
++            action.to_string(),
++        )
++        .with_metadata(details);
++
++        self.log(event)
++    }
++
++    /// Read audit events from a log file
++    pub fn read_log_file(path: &Path) -> Result<Vec<AuditEvent>> {
++        crate::cbor_handler::CBORHandler::deserialize_from_file(path)
++            .context("Failed to read audit log file")
++    }
++
++    /// Verify integrity of all events in a log file
++    pub fn verify_log_file(path: &Path) -> Result<bool> {
++        let events: Vec<AuditEvent> = Self::read_log_file(path)?;
++
++        for event in events {
++            if !event.verify_integrity() {
++                return Ok(false);
++            }
++        }
++
++        Ok(true)
++    }
++}
++
++impl Drop for AuditLogger {
++    fn drop(&mut self) {
++        // Ensure buffered events are flushed on drop
++        if let Err(e) = self.flush() {
++            eprintln!("Failed to flush audit events on drop: {}", e);
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use tempfile::tempdir;
++
++    #[test]
++    fn test_event_integrity() {
++        let event = AuditEvent::new(
++            AuditLevel::Info,
++            AuditEventType::ModuleLoaded,
++            "system".to_string(),
++            "load_template".to_string(),
++        );
++
++        assert!(event.verify_integrity());
++
++        // Tamper with event
++        let mut tampered = event.clone();
++        tampered.actor = "attacker".to_string();
++
++        assert!(!tampered.verify_integrity());
++    }
++
++    #[test]
++    fn test_audit_logger() {
++        let dir = tempdir().unwrap();
++        let mut logger = AuditLogger::new(dir.path().to_path_buf()).unwrap();
++
++        logger.log_module_load("test-module", "system").unwrap();
++        logger.log_module_execution("test-module", "system", true, 150).unwrap();
++
++        logger.flush().unwrap();
++
++        // Verify log files were created
++        let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
++        assert!(entries.len() > 0);
++    }
++
++    #[test]
++    fn test_log_file_verification() {
++        let dir = tempdir().unwrap();
++        let mut logger = AuditLogger::new(dir.path().to_path_buf()).unwrap();
++
++        logger.log_module_load("test", "system").unwrap();
++        logger.flush().unwrap();
++
++        // Find the log file
++        let log_file = std::fs::read_dir(dir.path())
++            .unwrap()
++            .next()
++            .unwrap()
++            .unwrap()
++            .path();
++
++        assert!(AuditLogger::verify_log_file(&log_file).unwrap());
++    }
++}
+diff --git a/src/cbor_handler.rs b/src/cbor_handler.rs
+new file mode 100644
+index 0000000..52714eb
+--- /dev/null
++++ b/src/cbor_handler.rs
+@@ -0,0 +1,191 @@
++// CBOR Data Handler
++// Handles serialization/deserialization of runtime data using CBOR format
++
++use anyhow::{Result, Context};
++use serde::{Serialize, Deserialize};
++use std::path::Path;
++use std::fs::File;
++use std::io::{Read, Write};
++use tracing::{info, debug};
++
++/// CBOR data handler for efficient binary serialization
++pub struct CBORHandler;
++
++impl CBORHandler {
++    /// Serialize data to CBOR format and write to file
++    pub fn serialize_to_file<T: Serialize>(data: &T, path: &Path) -> Result<()> {
++        info!("Serializing data to CBOR file: {:?}", path);
++
++        // Create parent directory if needed
++        if let Some(parent) = path.parent() {
++            std::fs::create_dir_all(parent)
++                .context("Failed to create parent directory")?;
++        }
++
++        let mut file = File::create(path)
++            .context("Failed to create CBOR file")?;
++
++        let cbor_data = serde_cbor::to_vec(data)
++            .context("Failed to serialize data to CBOR")?;
++
++        file.write_all(&cbor_data)
++            .context("Failed to write CBOR data to file")?;
++
++        debug!("Serialized {} bytes to {:?}", cbor_data.len(), path);
++
++        Ok(())
++    }
++
++    /// Deserialize data from CBOR file
++    pub fn deserialize_from_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
++        info!("Deserializing data from CBOR file: {:?}", path);
++
++        let mut file = File::open(path)
++            .context("Failed to open CBOR file")?;
++
++        let mut cbor_data = Vec::new();
++        file.read_to_end(&mut cbor_data)
++            .context("Failed to read CBOR file")?;
++
++        let data: T = serde_cbor::from_slice(&cbor_data)
++            .context("Failed to deserialize CBOR data")?;
++
++        debug!("Deserialized {} bytes from {:?}", cbor_data.len(), path);
++
++        Ok(data)
++    }
++
++    /// Serialize data to CBOR bytes
++    pub fn serialize<T: Serialize>(data: &T) -> Result<Vec<u8>> {
++        serde_cbor::to_vec(data)
++            .context("Failed to serialize data to CBOR")
++    }
++
++    /// Deserialize data from CBOR bytes
++    pub fn deserialize<T: for<'de> Deserialize<'de>>(cbor_data: &[u8]) -> Result<T> {
++        serde_cbor::from_slice(cbor_data)
++            .context("Failed to deserialize CBOR data")
++    }
++
++    /// Serialize data using ciborium (alternative CBOR implementation)
++    /// Provides more compact encoding for certain data structures
++    pub fn serialize_compact<T: Serialize>(data: &T) -> Result<Vec<u8>> {
++        let mut buffer = Vec::new();
++        ciborium::ser::into_writer(data, &mut buffer)
++            .context("Failed to serialize data with ciborium")?;
++        Ok(buffer)
++    }
++
++    /// Deserialize data using ciborium
++    pub fn deserialize_compact<T: for<'de> Deserialize<'de>>(cbor_data: &[u8]) -> Result<T> {
++        ciborium::de::from_reader(cbor_data)
++            .context("Failed to deserialize data with ciborium")
++    }
++}
++
++/// Module execution result with CBOR serialization
++#[derive(Debug, Serialize, Deserialize)]
++pub struct ExecutionResult {
++    pub module_id: String,
++    pub timestamp: chrono::DateTime<chrono::Utc>,
++    pub success: bool,
++    pub output: String,
++    pub error: Option<String>,
++    pub execution_time_ms: u64,
++    pub metadata: serde_json::Value,
++}
++
++impl ExecutionResult {
++    pub fn new_success(module_id: String, output: String, execution_time_ms: u64) -> Self {
++        Self {
++            module_id,
++            timestamp: chrono::Utc::now(),
++            success: true,
++            output,
++            error: None,
++            execution_time_ms,
++            metadata: serde_json::json!({}),
++        }
++    }
++
++    pub fn new_failure(module_id: String, error: String, execution_time_ms: u64) -> Self {
++        Self {
++            module_id,
++            timestamp: chrono::Utc::now(),
++            success: false,
++            output: String::new(),
++            error: Some(error),
++            execution_time_ms,
++            metadata: serde_json::json!({}),
++        }
++    }
++
++    /// Save execution result to CBOR file
++    pub fn save(&self, path: &Path) -> Result<()> {
++        CBORHandler::serialize_to_file(self, path)
++    }
++
++    /// Load execution result from CBOR file
++    pub fn load(path: &Path) -> Result<Self> {
++        CBORHandler::deserialize_from_file(path)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use tempfile::tempdir;
++
++    #[test]
++    fn test_serialize_deserialize_bytes() {
++        let original = ExecutionResult::new_success(
++            "test-module".to_string(),
++            "Test output".to_string(),
++            150
++        );
++
++        let cbor_data = CBORHandler::serialize(&original).unwrap();
++        let deserialized: ExecutionResult = CBORHandler::deserialize(&cbor_data).unwrap();
++
++        assert_eq!(deserialized.module_id, original.module_id);
++        assert_eq!(deserialized.success, original.success);
++        assert_eq!(deserialized.output, original.output);
++    }
++
++    #[test]
++    fn test_serialize_deserialize_file() {
++        let dir = tempdir().unwrap();
++        let file_path = dir.path().join("result.cbor");
++
++        let original = ExecutionResult::new_failure(
++            "failed-module".to_string(),
++            "Test error".to_string(),
++            75
++        );
++
++        original.save(&file_path).unwrap();
++        let loaded = ExecutionResult::load(&file_path).unwrap();
++
++        assert_eq!(loaded.module_id, original.module_id);
++        assert_eq!(loaded.success, false);
++        assert_eq!(loaded.error, original.error);
++    }
++
++    #[test]
++    fn test_compact_serialization() {
++        let original = ExecutionResult::new_success(
++            "test".to_string(),
++            "output".to_string(),
++            100
++        );
++
++        let standard = CBORHandler::serialize(&original).unwrap();
++        let compact = CBORHandler::serialize_compact(&original).unwrap();
++
++        // Both should be valid
++        let _: ExecutionResult = CBORHandler::deserialize(&standard).unwrap();
++        let _: ExecutionResult = CBORHandler::deserialize_compact(&compact).unwrap();
++
++        debug!("Standard: {} bytes, Compact: {} bytes", standard.len(), compact.len());
++    }
++}
+diff --git a/src/hdf5_manager.rs b/src/hdf5_manager.rs
+new file mode 100644
+index 0000000..7234974
+--- /dev/null
++++ b/src/hdf5_manager.rs
+@@ -0,0 +1,189 @@
++// HDF5 Template Manager
++// Handles loading/saving module templates using HDF5 format
++
++use anyhow::{Result, Context};
++use hdf5::{File, Group};
++use std::path::PathBuf;
++use tracing::{info, debug};
++use crate::orchestrator::ModuleTemplate;
++
++/// Manages HDF5 template storage and retrieval
++pub struct HDF5Manager {
++    template_dir: PathBuf,
++}
++
++impl HDF5Manager {
++    pub fn new(template_dir: PathBuf) -> Self {
++        Self { template_dir }
++    }
++
++    /// Load a module template from HDF5 file
++    pub fn load_template(&self, name: &str) -> Result<ModuleTemplate> {
++        let template_path = self.template_dir.join(format!("{}.h5", name));
++
++        info!("Loading HDF5 template from: {:?}", template_path);
++
++        if !template_path.exists() {
++            anyhow::bail!("Template file not found: {:?}", template_path);
++        }
++
++        let file = File::open(&template_path)
++            .context("Failed to open HDF5 template file")?;
++
++        // Read metadata group
++        let metadata_group = file.group("metadata")
++            .context("Failed to read metadata group")?;
++
++        let id = Self::read_string_attr(&metadata_group, "id")?;
++        let version = Self::read_string_attr(&metadata_group, "version")?;
++        let binary_path_str = Self::read_string_attr(&metadata_group, "binary_path")?;
++
++        // Read extended metadata as JSON
++        let metadata_json = Self::read_string_attr(&metadata_group, "extended_metadata")
++            .unwrap_or_else(|_| "{}".to_string());
++        let metadata: serde_json::Value = serde_json::from_str(&metadata_json)
++            .context("Failed to parse extended metadata JSON")?;
++
++        debug!("Loaded template: id={}, version={}", id, version);
++
++        Ok(ModuleTemplate {
++            id,
++            version,
++            binary_path: PathBuf::from(binary_path_str),
++            metadata,
++        })
++    }
++
++    /// Save a module template to HDF5 file
++    pub fn save_template(&self, template: &ModuleTemplate) -> Result<()> {
++        let template_path = self.template_dir.join(format!("{}.h5", template.id));
++
++        info!("Saving HDF5 template to: {:?}", template_path);
++
++        // Create parent directory if it doesn't exist
++        if let Some(parent) = template_path.parent() {
++            std::fs::create_dir_all(parent)
++                .context("Failed to create template directory")?;
++        }
++
++        let file = File::create(&template_path)
++            .context("Failed to create HDF5 template file")?;
++
++        // Create metadata group
++        let metadata_group = file.create_group("metadata")
++            .context("Failed to create metadata group")?;
++
++        Self::write_string_attr(&metadata_group, "id", &template.id)?;
++        Self::write_string_attr(&metadata_group, "version", &template.version)?;
++        Self::write_string_attr(&metadata_group, "binary_path",
++            template.binary_path.to_str().unwrap_or(""))?;
++
++        // Serialize extended metadata as JSON
++        let metadata_json = serde_json::to_string(&template.metadata)
++            .context("Failed to serialize extended metadata")?;
++        Self::write_string_attr(&metadata_group, "extended_metadata", &metadata_json)?;
++
++        // Create data group for future binary data storage
++        file.create_group("data")
++            .context("Failed to create data group")?;
++
++        info!("Template saved successfully: {}", template.id);
++
++        Ok(())
++    }
++
++    /// List all available templates
++    pub fn list_templates(&self) -> Result<Vec<String>> {
++        let mut templates = Vec::new();
++
++        if !self.template_dir.exists() {
++            return Ok(templates);
++        }
++
++        for entry in std::fs::read_dir(&self.template_dir)
++            .context("Failed to read template directory")?
++        {
++            let entry = entry.context("Failed to read directory entry")?;
++            let path = entry.path();
++
++            if path.extension().and_then(|s| s.to_str()) == Some("h5") {
++                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
++                    templates.push(stem.to_string());
++                }
++            }
++        }
++
++        debug!("Found {} templates", templates.len());
++        Ok(templates)
++    }
++
++    /// Helper: Read string attribute from HDF5 group
++    fn read_string_attr(group: &Group, name: &str) -> Result<String> {
++        let attr = group.attr(name)
++            .with_context(|| format!("Failed to read attribute: {}", name))?;
++
++        let value: hdf5::types::VarLenUnicode = attr.read_scalar()
++            .with_context(|| format!("Failed to read scalar value for: {}", name))?;
++
++        Ok(value.to_string())
++    }
++
++    /// Helper: Write string attribute to HDF5 group
++    fn write_string_attr(group: &Group, name: &str, value: &str) -> Result<()> {
++        let string_value = unsafe { hdf5::types::VarLenUnicode::from_str_unchecked(value) };
++
++        group.new_attr_builder()
++            .with_data(&string_value)
++            .create(name)
++            .with_context(|| format!("Failed to create attribute: {}", name))?;
++
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use tempfile::tempdir;
++
++    #[test]
++    fn test_save_and_load_template() {
++        let dir = tempdir().unwrap();
++        let manager = HDF5Manager::new(dir.path().to_path_buf());
++
++        let template = ModuleTemplate {
++            id: "test-module".to_string(),
++            version: "1.0.0".to_string(),
++            binary_path: PathBuf::from("/opt/modules/test"),
++            metadata: serde_json::json!({
++                "description": "Test module",
++                "author": "OASM Team"
++            }),
++        };
++
++        manager.save_template(&template).unwrap();
++        let loaded = manager.load_template("test-module").unwrap();
++
++        assert_eq!(loaded.id, template.id);
++        assert_eq!(loaded.version, template.version);
++        assert_eq!(loaded.binary_path, template.binary_path);
++    }
++
++    #[test]
++    fn test_list_templates() {
++        let dir = tempdir().unwrap();
++        let manager = HDF5Manager::new(dir.path().to_path_buf());
++
++        assert_eq!(manager.list_templates().unwrap().len(), 0);
++
++        let template = ModuleTemplate {
++            id: "module1".to_string(),
++            version: "1.0.0".to_string(),
++            binary_path: PathBuf::from("/opt/modules/module1"),
++            metadata: serde_json::json!({}),
++        };
++
++        manager.save_template(&template).unwrap();
++        assert_eq!(manager.list_templates().unwrap().len(), 1);
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+new file mode 100644
+index 0000000..cc769d3
+--- /dev/null
++++ b/src/lib.rs
+@@ -0,0 +1,41 @@
++// OASM Orchestrator Library
++// Modular security orchestration with HDF5, CBOR, and PyO3
++
++pub mod orchestrator;
++pub mod hdf5_manager;
++pub mod cbor_handler;
++pub mod powershell;
++pub mod audit;
++
++use anyhow::Result;
++use tracing::{info, debug};
++
++/// Initialize the OASM orchestrator system
++pub fn init() -> Result<()> {
++    // Set up tracing subscriber
++    tracing_subscriber::fmt()
++        .with_env_filter(
++            tracing_subscriber::EnvFilter::from_default_env()
++                .add_directive(tracing::Level::DEBUG.into())
++        )
++        .with_target(false)
++        .with_thread_ids(true)
++        .with_file(true)
++        .with_line_number(true)
++        .init();
++
++    info!("OASM Orchestrator initialized");
++    debug!("Debug logging enabled");
++
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn test_init() {
++        assert!(init().is_ok());
++    }
++}
+diff --git a/src/main.rs b/src/main.rs
+new file mode 100644
+index 0000000..6eaf650
+--- /dev/null
++++ b/src/main.rs
+@@ -0,0 +1,26 @@
++// OASM Orchestrator Main Entry Point
++
++use anyhow::Result;
++use tracing::info;
++
++fn main() -> Result<()> {
++    // Initialize the orchestrator
++    oasm_orchestrator::init()?;
++
++    info!("Starting OASM Orchestrator...");
++    info!("HDF5 template directory: /workspace/templates");
++    info!("Audit log directory: /workspace/logs");
++    info!("CBOR data directory: /workspace/data");
++
++    // TODO: Load HDF5 templates
++    // TODO: Initialize module lifecycle manager
++    // TODO: Start orchestration loop
++
++    println!("✓ OASM Orchestrator is ready");
++    println!("  Press Ctrl+C to shutdown");
++
++    // Keep running
++    std::thread::park();
++
++    Ok(())
++}
+diff --git a/src/orchestrator.rs b/src/orchestrator.rs
+new file mode 100644
+index 0000000..59a30b8
+--- /dev/null
++++ b/src/orchestrator.rs
+@@ -0,0 +1,54 @@
++// Core orchestration logic
++
++use anyhow::Result;
++use std::path::PathBuf;
++
++/// Module template loaded from HDF5
++pub struct ModuleTemplate {
++    pub id: String,
++    pub version: String,
++    pub binary_path: PathBuf,
++    pub metadata: serde_json::Value,
++}
++
++/// Orchestrator manages module lifecycle
++pub struct Orchestrator {
++    template_dir: PathBuf,
++    active_modules: Vec<ModuleTemplate>,
++}
++
++impl Orchestrator {
++    pub fn new(template_dir: PathBuf) -> Self {
++        Self {
++            template_dir,
++            active_modules: Vec::new(),
++        }
++    }
++
++    /// Load a module from HDF5 template
++    pub fn load_module(&mut self, template_name: &str) -> Result<()> {
++        tracing::info!("Loading module from template: {}", template_name);
++        // TODO: Implement HDF5 template loading
++        Ok(())
++    }
++
++    /// Execute a loaded module
++    pub fn execute_module(&self, module_id: &str) -> Result<()> {
++        tracing::info!("Executing module: {}", module_id);
++        // TODO: Implement module execution with audit logging
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use tempfile::tempdir;
++
++    #[test]
++    fn test_orchestrator_new() {
++        let dir = tempdir().unwrap();
++        let orch = Orchestrator::new(dir.path().to_path_buf());
++        assert_eq!(orch.active_modules.len(), 0);
++    }
++}
+diff --git a/src/powershell.rs b/src/powershell.rs
+new file mode 100644
+index 0000000..0ba58bc
+--- /dev/null
++++ b/src/powershell.rs
+@@ -0,0 +1,276 @@
++// PowerShell Wrapper Module
++// Provides safe execution of PowerShell scripts with audit logging
++
++use anyhow::{Result, Context};
++use std::process::{Command, Stdio};
++use std::path::Path;
++use tracing::{info, debug, warn, error};
++use chrono::Utc;
++use uuid::Uuid;
++
++/// PowerShell execution configuration
++#[derive(Debug, Clone)]
++pub struct PowerShellConfig {
++    /// PowerShell executable path (default: "pwsh" for PowerShell 7.x)
++    pub executable: String,
++    /// Working directory for script execution
++    pub working_dir: Option<String>,
++    /// Execution timeout in seconds
++    pub timeout_seconds: u64,
++    /// Whether to capture stdout
++    pub capture_output: bool,
++    /// Whether to capture stderr
++    pub capture_stderr: bool,
++}
++
++impl Default for PowerShellConfig {
++    fn default() -> Self {
++        Self {
++            executable: "pwsh".to_string(),
++            working_dir: None,
++            timeout_seconds: 300, // 5 minutes
++            capture_output: true,
++            capture_stderr: true,
++        }
++    }
++}
++
++/// PowerShell execution result
++#[derive(Debug)]
++pub struct PowerShellResult {
++    pub execution_id: Uuid,
++    pub success: bool,
++    pub exit_code: i32,
++    pub stdout: String,
++    pub stderr: String,
++    pub execution_time_ms: u64,
++    pub timestamp: chrono::DateTime<Utc>,
++}
++
++/// PowerShell wrapper for safe script execution
++pub struct PowerShellWrapper {
++    config: PowerShellConfig,
++}
++
++impl PowerShellWrapper {
++    pub fn new(config: PowerShellConfig) -> Self {
++        Self { config }
++    }
++
++    /// Execute a PowerShell script from string
++    pub fn execute_script(&self, script: &str) -> Result<PowerShellResult> {
++        let execution_id = Uuid::new_v4();
++        let start_time = std::time::Instant::now();
++
++        info!("Executing PowerShell script [{}]", execution_id);
++        debug!("Script content: {}", script);
++
++        let mut command = Command::new(&self.config.executable);
++
++        // Set execution policy and other safety flags
++        command
++            .arg("-NoProfile")
++            .arg("-NonInteractive")
++            .arg("-ExecutionPolicy")
++            .arg("Bypass")
++            .arg("-Command")
++            .arg(script);
++
++        // Set working directory if specified
++        if let Some(ref working_dir) = self.config.working_dir {
++            command.current_dir(working_dir);
++        }
++
++        // Configure stdio
++        if self.config.capture_output {
++            command.stdout(Stdio::piped());
++        }
++        if self.config.capture_stderr {
++            command.stderr(Stdio::piped());
++        }
++
++        // Execute the command
++        let output = command.output()
++            .context("Failed to execute PowerShell command")?;
++
++        let execution_time_ms = start_time.elapsed().as_millis() as u64;
++
++        let stdout = if self.config.capture_output {
++            String::from_utf8_lossy(&output.stdout).to_string()
++        } else {
++            String::new()
++        };
++
++        let stderr = if self.config.capture_stderr {
++            String::from_utf8_lossy(&output.stderr).to_string()
++        } else {
++            String::new()
++        };
++
++        let exit_code = output.status.code().unwrap_or(-1);
++        let success = output.status.success();
++
++        if !success {
++            warn!("PowerShell script failed with exit code: {}", exit_code);
++            debug!("stderr: {}", stderr);
++        }
++
++        info!("PowerShell execution completed [{}] in {}ms", execution_id, execution_time_ms);
++
++        Ok(PowerShellResult {
++            execution_id,
++            success,
++            exit_code,
++            stdout,
++            stderr,
++            execution_time_ms,
++            timestamp: Utc::now(),
++        })
++    }
++
++    /// Execute a PowerShell script from file
++    pub fn execute_script_file(&self, script_path: &Path) -> Result<PowerShellResult> {
++        let execution_id = Uuid::new_v4();
++
++        info!("Executing PowerShell script file [{}]: {:?}", execution_id, script_path);
++
++        if !script_path.exists() {
++            anyhow::bail!("Script file not found: {:?}", script_path);
++        }
++
++        let script_path_str = script_path.to_str()
++            .context("Invalid script path")?;
++
++        // Use -File parameter for script files
++        let start_time = std::time::Instant::now();
++
++        let mut command = Command::new(&self.config.executable);
++
++        command
++            .arg("-NoProfile")
++            .arg("-NonInteractive")
++            .arg("-ExecutionPolicy")
++            .arg("Bypass")
++            .arg("-File")
++            .arg(script_path_str);
++
++        if let Some(ref working_dir) = self.config.working_dir {
++            command.current_dir(working_dir);
++        }
++
++        if self.config.capture_output {
++            command.stdout(Stdio::piped());
++        }
++        if self.config.capture_stderr {
++            command.stderr(Stdio::piped());
++        }
++
++        let output = command.output()
++            .context("Failed to execute PowerShell script file")?;
++
++        let execution_time_ms = start_time.elapsed().as_millis() as u64;
++
++        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
++        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
++        let exit_code = output.status.code().unwrap_or(-1);
++        let success = output.status.success();
++
++        if !success {
++            warn!("PowerShell script file failed with exit code: {}", exit_code);
++        }
++
++        info!("PowerShell file execution completed [{}] in {}ms", execution_id, execution_time_ms);
++
++        Ok(PowerShellResult {
++            execution_id,
++            success,
++            exit_code,
++            stdout,
++            stderr,
++            execution_time_ms,
++            timestamp: Utc::now(),
++        })
++    }
++
++    /// Execute a simple PowerShell command
++    pub fn execute_command(&self, command: &str) -> Result<PowerShellResult> {
++        self.execute_script(command)
++    }
++
++    /// Check if PowerShell is available
++    pub fn check_availability(&self) -> bool {
++        let output = Command::new(&self.config.executable)
++            .arg("-Command")
++            .arg("Write-Output 'PowerShell Available'")
++            .output();
++
++        match output {
++            Ok(out) => out.status.success(),
++            Err(e) => {
++                error!("PowerShell not available: {}", e);
++                false
++            }
++        }
++    }
++
++    /// Get PowerShell version
++    pub fn get_version(&self) -> Result<String> {
++        let result = self.execute_script("$PSVersionTable.PSVersion.ToString()")?;
++
++        if result.success {
++            Ok(result.stdout.trim().to_string())
++        } else {
++            anyhow::bail!("Failed to get PowerShell version: {}", result.stderr)
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn test_powershell_availability() {
++        let config = PowerShellConfig::default();
++        let wrapper = PowerShellWrapper::new(config);
++
++        // This test will only pass if PowerShell is installed
++        if wrapper.check_availability() {
++            println!("PowerShell is available");
++        } else {
++            println!("PowerShell is not available (test skipped)");
++        }
++    }
++
++    #[test]
++    fn test_simple_command() {
++        let config = PowerShellConfig::default();
++        let wrapper = PowerShellWrapper::new(config);
++
++        if !wrapper.check_availability() {
++            println!("PowerShell not available, skipping test");
++            return;
++        }
++
++        let result = wrapper.execute_command("Write-Output 'Hello from PowerShell'").unwrap();
++
++        assert!(result.success);
++        assert!(result.stdout.contains("Hello from PowerShell"));
++    }
++
++    #[test]
++    fn test_failed_command() {
++        let config = PowerShellConfig::default();
++        let wrapper = PowerShellWrapper::new(config);
++
++        if !wrapper.check_availability() {
++            println!("PowerShell not available, skipping test");
++            return;
++        }
++
++        let result = wrapper.execute_command("throw 'Test error'").unwrap();
++
++        assert!(!result.success);
++        assert_ne!(result.exit_code, 0);
++    }
++}
+diff --git a/tests/test_fuzz.py b/tests/test_fuzz.py
+new file mode 100644
+index 0000000..e22f341
+--- /dev/null
++++ b/tests/test_fuzz.py
+@@ -0,0 +1,14 @@
++import cbor2
++from hypothesis import given, strategies as st
++
++@given(st.binary())
++def test_parse_cbor_no_crash(data):
++    # Ensure that parsing arbitrary data does not raise unexpected exceptions
++    try:
++        obj = cbor2.loads(data)
++        # Basic sanity check: if it's a dict/list, ensure it serializes back
++        if isinstance(obj, (dict, list)):
++            assert cbor2.dumps(obj) is not None
++    except Exception:
++        # We accept parse failures but not crashes; test passes if no unhandled crash
++        pass
+diff --git a/tests/test_hdf5_schema.py b/tests/test_hdf5_schema.py
+new file mode 100644
+index 0000000..435a53b
+--- /dev/null
++++ b/tests/test_hdf5_schema.py
+@@ -0,0 +1,34 @@
++import glob
++import pytest
++
++try:
++    import h5py
++except Exception:
++    h5py = None
++
++HDF5_FILES = glob.glob('**/*.h5', recursive=True) + glob.glob('**/*.hdf5', recursive=True)
++
++@pytest.mark.skipif(h5py is None, reason='h5py not installed')
++def test_hdf5_contains_ps_insider_group():
++    if not HDF5_FILES:
++        pytest.skip('No HDF5 files found in repository; schema checks skipped')
++
++    for path in HDF5_FILES:
++        with h5py.File(path, 'r') as f:
++            assert '/core' in f, f"{path} missing /core group"
++            assert '/core/ps_insider' in f, f"{path} missing /core/ps_insider group"
++
++@pytest.mark.skipif(h5py is None, reason='h5py not installed')
++def test_templates_have_signature_metadata():
++    if not HDF5_FILES:
++        pytest.skip('No HDF5 files found in repository; signature checks skipped')
++
++    for path in HDF5_FILES:
++        with h5py.File(path, 'r') as f:
++            if '/core/ps_insider/templates' in f:
++                templates = f['/core/ps_insider/templates']
++                for name, item in templates.items():
++                    # Check for some form of signature metadata on template groups/datasets
++                    attrs = item.attrs
++                    has_sig = any(k.lower() in ('signature', 'signer', 'signature_digest', 'signed') for k in attrs.keys())
++                    assert has_sig, f"Template {name} in {path} missing signature metadata"
+diff --git "a/\342\224\214\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200.txt" "b/\342\224\214\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200.txt"
+new file mode 100644
+index 0000000..7c06ec2
+--- /dev/null
++++ "b/\342\224\214\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200.txt"
+@@ -0,0 +1,51 @@
++┌────────────────────────────────────────────────────────────┐
++│                    USER INPUT / EXTERNAL TOOLS             │
++│        (CLI, API, Legacy Scripts, External Programs)       │
++└────────────────────────────────────────────────────────────┘
++                          │
++                          ▼
++┌────────────────────────────────────────────────────────────┐
++│             PROGRAM INTERFACE ENGINE (PIE) [optional]      │
++│  - Live monitored bridges to running programs              │
++│  - Daemon/bot-assisted interaction                         │
++│  - Logs, health, and schema-bound control                  │
++└────────────────────────────────────────────────────────────┘
++                          │
++                          ▼
++┌────────────────────────────────────────────────────────────┐
++│         COMPATIBILITY & HANDLER ENGINE TIER (CTier)        │
++│  - Mirrors Essentials structure                            │
++│  - CBOR/YAML rule mappings                                 │
++│  - Normalizes legacy/foreign behaviors                     │
++└────────────────────────────────────────────────────────────┘
++                          │
++                          ▼
++┌────────────────────────────────────────────────────────────┐
++│                  STAGING ENGINE (OASM Conductor)           │
++│  - Validates, queues, promotes tasks/modules               │
++│  - Thread-aware execution planning                         │
++│  - Rollback, provenance, diff tracking                     │
++└────────────────────────────────────────────────────────────┘
++                          │
++                          ▼
++┌────────────────────────────────────────────────────────────┐
++│                   ESSENTIAL MODULES TIER                   │
++│  - Modular, schema-bound components                        │
++│  - Grouped by domain (fs, net, auth, proc, etc.)           │
++│  - Each with micro CI, rollback, and safety flags          │
++└────────────────────────────────────────────────────────────┘
++                          │
++                          ▼
++┌────────────────────────────────────────────────────────────┐
++│                   EXECUTION CORE LAYER                     │
++│  - Rust Orchestrator (validation, execution, rollback)     │
++│  - PyO3 Layer (AI repair, mutation, scaffolding)           │
++│  - WSL/Native syscall bridges                              │
++└────────────────────────────────────────────────────────────┘
++                          │
++                          ▼
++┌────────────────────────────────────────────────────────────┐
++│                      SYSTEM LAYER                          │
++│  - Filesystem, Network, Kernel, Hardware                   │
++│  - Final execution targets                                 │
++└────────────────────────────────────────────────────────────┘

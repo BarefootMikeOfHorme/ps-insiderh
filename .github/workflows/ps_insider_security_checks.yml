@@ -1,0 +1,107 @@
+name: PS-Insider Security Checks
+
+on:
+  pull_request: {}
+  push:
+    branches: [ main, master ]
+
+jobs:
+  wdac_validation:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v2
+
+      - name: Create sample WDAC policy for runtime validation
+        run: |
+          mkdir wdac || true
+          @"<Policy><Rule Id=\"test\"/></Policy>"@ > wdac\policy.xml
+
+      - name: Run WDAC policy validation
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./ci/wdac_validate.ps1
+
+  signature_verification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install GPG
+        run: |
+          sudo apt-get update && sudo apt-get install -y gnupg
+
+      - name: Generate canonical fixtures (if missing)
+        run: |
+          chmod +x ./scripts/generate-fixtures.sh || true
+          ./scripts/generate-fixtures.sh || true
+
+      - name: Verify OPB/template signatures
+        run: |
+          chmod +x ./ci/verify_signatures.sh
+          ./ci/verify_signatures.sh
+
+  static_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run static scan for WinAPI patterns
+        run: |
+          chmod +x ./ci/static_scan.sh
+          ./ci/static_scan.sh
+
+  semgrep_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: .semgrep.yml
+
+  py03_fuzzing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ci/requirements.txt
+
+      - name: Run Py03 fuzzing and coverage
+        run: |
+          pytest --maxfail=1 --disable-warnings -q --cov=. --cov-report=xml
+
+      - name: Check coverage threshold
+        run: |
+          python ./ci/check_coverage.py --min 60 --report coverage.xml
+
+  upload_artifacts:
+    runs-on: ubuntu-latest
+    needs: [signature_verification, py03_fuzzing, static_scan, semgrep_scan]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps-insider-ci-artifacts
+          path: |
+            ./ci/**
+            ./tests/**
+            ./coverage.xml

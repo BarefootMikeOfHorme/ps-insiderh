@@ -1,0 +1,9 @@
+# Ignore specific docs per request
+DOCKER_BLUEPRINT.md
+OASM CORE  WPSHELL PS2026  RUST  PY03 IN HDF5.txt
+
+# Common ignores
+target/
+**/node_modules/
+*.log
+*.bak
