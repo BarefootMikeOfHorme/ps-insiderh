@@ -43,3 +43,10 @@ Notes & Next improvements:
 - Coverage check: `ci/check_coverage.py` enforces a minimum total coverage threshold (default 60%).
 - Tests: added `tests/test_verify_signatures.py` which generates a temporary GPG keypair and validates verification flow as a positive test.
 
+Local development
+- Create a virtual environment and install test/dev requirements:
+  - Windows: `python -m venv .venv && .venv\Scripts\Activate.ps1` then `pip install -r ci/requirements.txt`
+  - Linux/macOS: `python -m venv .venv && source .venv/bin/activate` then `pip install -r ci/requirements.txt`
+- In VS Code: select the interpreter from `.venv` (Command Palette → "Python: Select Interpreter") so Pylance can resolve `pytest`, `h5py`, and other test deps.
+- If you prefer containerized dev, add a devcontainer that installs `ci/requirements.txt` and sets the interpreter accordingly.
+
