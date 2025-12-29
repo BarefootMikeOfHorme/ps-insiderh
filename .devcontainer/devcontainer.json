@@ -1,0 +1,12 @@
+{
+  "name": "PS-Insider Devcontainer",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "settings": {
+    "terminal.integrated.defaultProfile.linux": "bash"
+  },
+  "postCreateCommand": "python -m venv .venv && . .venv/bin/activate && pip install --upgrade pip && pip install -r ci/requirements.txt",
+  "extensions": ["ms-python.python", "ms-vscode.powershell"],
+  "remoteUser": "vscode"
+}
