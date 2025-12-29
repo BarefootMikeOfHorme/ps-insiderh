@@ -35,7 +35,7 @@ Workflow changes:
 - `.github/workflows/ps_insider_security_checks.yml` now runs the above scripts and includes semgrep and coverage threshold checks.
 
 Notes & Next improvements:
-- WDAC validation is best-effort in CI: it verifies presence and XML structure and will attempt signature checks if certutil available. For full enforcement tests, we recommend an on-host validation step with a signed policy and a restricted test VM.
+- WDAC validation is best-effort in CI: it verifies presence and XML structure and will attempt signature checks if certutil available. For full enforcement tests, we recommend an on-host validation step with a signed policy and a restricted test VM. We added a runtime harness step that creates a sample policy and runs the structural validation in CI; for full enforcement, consider running isolated VM-based WDAC tests or using Azure VM scale sets for gated runtime validation.
 - **Signer trust**: `ci/verify_signatures.sh` now supports `SIGNER_PUBKEY` for importing a trusted public key (imported into an isolated GNUPGHOME to avoid polluting the global keyring). For production, add a secure secret (GPG key or certificate) via repository secrets and import into CI runtime. Also consider signing artifacts with a CI signing key and storing public keys in the release assets.
 - Signature verification assumes GPG-signed artifacts or CMS signatures; add signer cert import and trust chain verification as needed.
 - Py03 fuzzing uses Hypothesis to drive CBOR parsing; expand tests to use project-specific parsers and templates for deeper coverage and raise coverage thresholds as the test suite improves.
