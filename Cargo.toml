@@ -1,0 +1,80 @@
+[package]
+name = "oasm-orchestrator"
+version = "0.1.0"
+edition = "2021"
+authors = ["OASM Team"]
+description = "Modular security orchestration system with Rust, HDF5, and PyO3"
+license = "MIT"
+
+[lib]
+name = "oasm_orchestrator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "oasm-orchestrator"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_cbor = "0.11"  # CBOR serialization
+ciborium = "0.2"     # Alternative CBOR implementation
+
+# HDF5 support
+hdf5 = "0.8"
+
+# PyO3 for Python integration
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py311"] }
+
+# Logging and observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+blake3 = "1.5"  # Cryptographic hashing
+
+# Windows API support (conditional)
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.52", features = [
+    "Win32_System_Threading",
+    "Win32_Security",
+    "Win32_Foundation",
+] }
+
+[dev-dependencies]
+# Testing frameworks
+proptest = "1.4"  # Property-based testing
+quickcheck = "1.0"
+criterion = "0.5"  # Benchmarking
+
+# Test utilities
+tempfile = "3.8"
+mockito = "1.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[features]
+default = ["oasm-integration"]
+oasm-integration = []  # Enable OASM REST API integration
+powershell-wrapper = []  # PowerShell invocation support
+full-audit = []  # Extended audit logging

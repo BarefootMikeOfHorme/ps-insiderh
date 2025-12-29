@@ -1,0 +1,51 @@
+┌────────────────────────────────────────────────────────────┐
+│                    USER INPUT / EXTERNAL TOOLS             │
+│        (CLI, API, Legacy Scripts, External Programs)       │
+└────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│             PROGRAM INTERFACE ENGINE (PIE) [optional]      │
+│  - Live monitored bridges to running programs              │
+│  - Daemon/bot-assisted interaction                         │
+│  - Logs, health, and schema-bound control                  │
+└────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│         COMPATIBILITY & HANDLER ENGINE TIER (CTier)        │
+│  - Mirrors Essentials structure                            │
+│  - CBOR/YAML rule mappings                                 │
+│  - Normalizes legacy/foreign behaviors                     │
+└────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│                  STAGING ENGINE (OASM Conductor)           │
+│  - Validates, queues, promotes tasks/modules               │
+│  - Thread-aware execution planning                         │
+│  - Rollback, provenance, diff tracking                     │
+└────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│                   ESSENTIAL MODULES TIER                   │
+│  - Modular, schema-bound components                        │
+│  - Grouped by domain (fs, net, auth, proc, etc.)           │
+│  - Each with micro CI, rollback, and safety flags          │
+└────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│                   EXECUTION CORE LAYER                     │
+│  - Rust Orchestrator (validation, execution, rollback)     │
+│  - PyO3 Layer (AI repair, mutation, scaffolding)           │
+│  - WSL/Native syscall bridges                              │
+└────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│                      SYSTEM LAYER                          │
+│  - Filesystem, Network, Kernel, Hardware                   │
+│  - Final execution targets                                 │
+└────────────────────────────────────────────────────────────┘

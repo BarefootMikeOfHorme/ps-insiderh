@@ -1,0 +1,46 @@
+Replacements Applied — PS-Insider Retargeting & OASM Compiler Updates
+
+Files changed and key replacements (exact excerpts):
+
+1) PLAN FOR OASM  WPSHELL PS2026  RUST  PY03 COMBO.txt (and new file created PLAN FOR OASM - PS-INSIDER HARDENED + RUST + PY03.txt)
+- Title:
+  - OLD: "PLAN: OASM + WPSHELL/PS2026 + RUST + PY03 COMBO"
+  - NEW: "PLAN: OASM — PS-INSIDER HARDENED + RUST + PY03"
+- GOAL:
+  - OLD: "- Reduce WPShell + PS 2026 to minimal, modular cores."
+  - NEW: "- Target a hardened PowerShell Insider runtime (PS-Insider) with no WPShell dependency; minimal, constrained modular core."
+- PHASE 1: replaced "DEFINE MINIMAL SHELL CORE" with "HARDEN MINIMAL POWERSHELL INSIDER RUNTIME" and updated responsibilities to include AMSI/WDAC, signed templates, AppContainer, no direct unmanaged WinAPI from scripts.
+- Template paths:
+  - OLD: "/core/wpshell/templates" and "/core/ps2026/templates"
+  - NEW: "/core/ps_insider/templates"
+- END STATE shell line:
+  - OLD: "a minimal, modular shell core (WPShell/PS2026)"
+  - NEW: "a hardened, minimal PowerShell Insider runtime (PS-Insider)"
+
+2) deepresearchresults.txt
+- Title:
+  - OLD: "Feasibility Analysis of Integrating OASM, WPShell/PS2026, Rust, and PyO3"
+  - NEW: "Feasibility Analysis of Integrating OASM, PS-Insider Hardened, Rust, and PyO3"
+- OASM description:
+  - OLD: described OASM as an open-source platform for attack surface management
+  - NEW: "OASM is an essential inner-core compiler module that produces immutable, signed templates and OPBs (HDF5 artifacts) for the hardened PowerShell Insider runtime..."
+- Replaced sections about "Minimizing WPShell and PS2026" with "Harden minimal PowerShell Insider runtime" and added hardening detail (signed templates, constrained language, AMSI/WDAC, no direct WinAPI from scripts).
+- Replaced table row for Shell Layer to "PS-Insider Hardened" with notes on WDAC/AMSI and signature enforcement.
+
+6) LINEAGE REVERT MODEL FOR ENHANCEMENTS.txt
+- Replaced "Shell pipeline checks (WPShell/PS behavior, environment correctness)" to "Shell pipeline checks (PS-Insider behavior, environment correctness)"
+
+7) PY03 PATTERN-TESTING ENGINE (SHORT)expand.txt
+- Replaced "Interact with shell (WPShell/PS) to:" with "Interact with shell (PS-Insider) to:"
+
+Notes:
+- Instances where "WPShell" was referenced to indicate removal of legacy dependencies were clarified rather than removed entirely (e.g., "Remove any WPShell dependencies and legacy hooks").
+- All replacements were done with contextual search-and-replace, preserving surrounding content and logging where edits occurred.
+
+Recommended follow-ups (see MIGRATION_CHECKLIST.md for details):
+- Add a Threat Model & Compliance section to the plan with measurable acceptance criteria (WDAC, TPM attestation, signature verification, SIEM ingestion tests).
+- Implement CI checks and acceptance gating for WDAC, signature verification, Py03 fuzz coverage, and static analysis to detect direct WinAPI use in scripts.
+- Update HDF5 schemas and tests to reflect /core/ps_insider and ensure template metadata includes signature info.
+- Consider automating HDF5 group renaming for live/staged compositions, if needed.
+
+If you'd like, I can now prepare a PR-ready diff (patch) file containing these changes, or push these edits to a remote repo if you provide repository details/permissions.

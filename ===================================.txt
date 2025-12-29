@@ -1,0 +1,46 @@
+============================================================
+A — OASM CORE + PS-INSIDER HARDENED + RUST + PY03 IN HDF5
+============================================================
+
+PURPOSE
+------------------------------------------------------------
+Define how HDF5 is used to organize and stabilize the OASM core
+environment, including:
+- PS-Insider (hardened) integration
+- Rust control layer
+- Python 3 (Py03) scripting (not replacing Rust; a useful toolkit for testing and refinement)
+- CBOR-backed runtime state
+- modular kits and templates
+- logging, checksums, tests
+
+The goal:
+- everything is modular
+- everything is verifiable
+- everything is repairable
+- everything is auditable
+- everything is built from small pieces, staged into known-good wholes.
+
+
+HIGH-LEVEL STRUCTURE
+------------------------------------------------------------
+The OASM Core HDF5 file (e.g. oasm_core.hdf5) will contain:
+
+/core
+  /ps_insider
+  /rust
+  /py03
+  /cbor_layouts
+  /schemas
+   /hdf5
+  /templates
+  /logging
+  /tests
+  /lineage
+  /staging
+
+Each of these is further broken down into:
+- base mechanisms (small units, <100 LOC where possible)
+- templates (immutable building blocks)
+- staged compositions (known-good assemblies)
+- logging and testing rules
+- checksums and verification metadata
