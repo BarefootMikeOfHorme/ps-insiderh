@@ -3,3 +3,4 @@ pytest
 pytest-cov
 cbor2
 coverage
+h5py
