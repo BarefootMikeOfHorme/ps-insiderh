@@ -32,10 +32,14 @@ Implemented scripts (initial):
 - `ci/requirements.txt` — Python dependencies for fuzzing/coverage
 
 Workflow changes:
-- `.github/workflows/ps_insider_security_checks.yml` now runs the above scripts.
+- `.github/workflows/ps_insider_security_checks.yml` now runs the above scripts and includes semgrep and coverage threshold checks.
 
 Notes & Next improvements:
 - WDAC validation is best-effort in CI: it verifies presence and XML structure and will attempt signature checks if certutil available. For full enforcement tests, we recommend an on-host validation step with a signed policy and a restricted test VM.
+- **Signer trust**: `ci/verify_signatures.sh` now supports `SIGNER_PUBKEY` for importing a trusted public key (imported into an isolated GNUPGHOME to avoid polluting the global keyring). For production, add a secure secret (GPG key or certificate) via repository secrets and import into CI runtime. Also consider signing artifacts with a CI signing key and storing public keys in the release assets.
 - Signature verification assumes GPG-signed artifacts or CMS signatures; add signer cert import and trust chain verification as needed.
-- Py03 fuzzing uses Hypothesis to drive CBOR parsing; expand tests to use project-specific parsers and templates for deeper coverage.
-- Static scan uses heuristic grep patterns; consider integrating a more expressive analyzer (semgrep or custom AST checks) for fewer false positives.
+- Py03 fuzzing uses Hypothesis to drive CBOR parsing; expand tests to use project-specific parsers and templates for deeper coverage and raise coverage thresholds as the test suite improves.
+- Static scan uses heuristic grep patterns; we added Semgrep as a more robust static analyzer with rules in `.semgrep.yml` to reduce false positives and provide richer signals.
+- Coverage check: `ci/check_coverage.py` enforces a minimum total coverage threshold (default 60%).
+- Tests: added `tests/test_verify_signatures.py` which generates a temporary GPG keypair and validates verification flow as a positive test.
+

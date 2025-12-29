@@ -2,9 +2,23 @@
 set -euo pipefail
 
 # Verify signatures for OPB/HDF5 artifacts in /core/staging or repo root
+# Supports optional signer public key import via SIGNER_PUBKEY env var
 ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 SEARCH_DIRS=("$ROOT/core/staging" "$ROOT")
 SIGNED=false
+
+# Use isolated GPG home if a signer key is provided
+if [ -n "${SIGNER_PUBKEY:-}" ]; then
+  export GNUPGHOME="$(mktemp -d)"
+  echo "Using isolated GNUPGHOME: $GNUPGHOME"
+  if [ -f "$SIGNER_PUBKEY" ]; then
+    echo "Importing signer public key: $SIGNER_PUBKEY"
+    gpg --import "$SIGNER_PUBKEY" >/dev/null 2>&1 || { echo "Failed to import signer pubkey"; exit 1; }
+  else
+    echo "SIGNER_PUBKEY set but file not found: $SIGNER_PUBKEY"
+    exit 1
+  fi
+fi
 
 echo "Looking for artifacts to verify..."
 for d in "${SEARCH_DIRS[@]}"; do

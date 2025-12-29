@@ -1,0 +1,15 @@
+rules:
+  - id: ps-insider-no-direct-winapi
+    patterns:
+      - pattern: CreateProcess
+      - pattern: LoadLibrary
+      - pattern: GetProcAddress
+      - pattern: "[DllImport($X$)]"
+      - pattern: ctypes.windll
+      - pattern: Add-Type -TypeDefinition
+    message: "Potential direct WinAPI or unsafe native interop usage; prefer Rust wrappers"
+    severity: ERROR
+    languages: [python, powershell, csharp, c]
+    metadata:
+      category: security
+      precision: high
