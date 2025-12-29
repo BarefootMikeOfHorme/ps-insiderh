@@ -1,0 +1,54 @@
+name: PS-Insider Security Checks
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  wdac_validation:
+    runs-on: windows-latest
+    if: runner.os == 'Windows'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v2
+
+      - name: Run WDAC policy validation (stub)
+        run: |
+          Write-Host "Running WDAC validation stub"
+          # Replace with script to validate WDAC policy (e.g., test signing policy against test workload)
+
+  signature_verification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install verification tools (stub)
+        run: |
+          echo "Installing signature verification tools"
+
+      - name: Verify OPB/template signatures (stub)
+        run: |
+          echo "Run signature verification over /core/staging artifacts"
+          # Implement script: find OPB/HDF5 artifacts, verify signatures and reproducible hashes
+
+  py03_fuzzing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Run Py03 fuzzing (stub)
+        run: |
+          python -m pip install -r requirements.txt || true
+          echo "Run Py03-based fuzzing harness and report coverage/critical failures"
+          # Integrate with hypothesis/fuzzing harness and fail on critical crashes or low coverage

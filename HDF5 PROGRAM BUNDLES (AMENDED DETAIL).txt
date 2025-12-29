@@ -1,0 +1,48 @@
+============================================================
+HDF5 PROGRAM BUNDLES (AMENDED DETAIL)
+============================================================
+
+Every program meant to run on OASM is distributed as a single .hdf5 dataset.
+This dataset is immutable and acts as the canonical source for the program and
+contains:
+
+- binaries
+  Executables, shared libraries, runtime components.
+
+- modules
+  OASM-compatible command blocks, automation modules, orchestration units.
+
+- schemas
+  Definitions for CBOR/YAML/JSON structures, validation rules, version metadata.
+
+- assets
+  Textures, geometry, icons, templates, media, data files.
+
+- defaults
+  Initial configuration values, preset states, baseline parameters.
+
+- lineage metadata
+  Program version, schema version, author metadata, build lineage.
+
+- configuration templates
+  YAML templates for user-editable variables, environment presets.
+
+- logging setup
+  Default logging rules, log schema, severity levels, lineage logging configuration.
+
+- legal and usage documents
+  License text, usage guidelines, disclaimers, attribution requirements.
+
+- scripts for third-party downloads
+  Command blocks or module scripts that fetch external dependencies,
+  including error handling, retry logic, and fallback behavior.
+
+- grouped templates for command blocks, modules, and scripts
+  Preset collections intended for user/AI use; some included by default,
+  others added intentionally on request.
+
+- an /install command block or module script
+  The installer logic executed by the OASM Bundle Wizard to generate the
+  working environment.
+
+============================================================
