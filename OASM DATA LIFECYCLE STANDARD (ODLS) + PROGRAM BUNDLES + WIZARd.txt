@@ -1,0 +1,114 @@
+============================================================
+OASM DATA LIFECYCLE STANDARD (ODLS)
+Program Bundles (OPB) and OASM Bundle Wizard (OBW)
+============================================================
+
+1. PURPOSE
+Define how all OASM-compatible programs are packaged, installed, configured,
+executed, logged, and published. Ensure deterministic behavior, reproducibility,
+lineage, and modularity across the ecosystem.
+
+2. INSTALLATION MODEL
+- OASM itself installs once using a normal OS installer.
+- After that, all program installs are handled by the OASM Bundle Wizard (OBW),
+  not the OS.
+- OBW understands OASM Program Bundles (OPB), which are HDF5-based, and runs
+  their internal install scripts.
+
+3. OASM PROGRAM BUNDLES (OPB)
+Each program meant to run on OASM is distributed as a single .hdf5 dataset
+containing
+
+- binaries
+  Executables, shared libraries, runtime components.
+
+- modules
+  OASM command blocks, automation modules, orchestration units.
+
+- schemas
+  CBORYAMLJSON schema definitions, validation rules, version metadata.
+
+- assets
+  Textures, geometry, icons, templates, media, data files.
+
+- defaults
+  Initial configuration values, preset states, baseline parameters.
+
+- lineage
+  Program version, schema version, author metadata, build lineage.
+
+- configs
+  YAML configuration templates for user-editable variables.
+
+- logging
+  Logging schema, severity levels, lineage logging configuration.
+
+- legal
+  License text, usage guidelines, disclaimers, attribution requirements.
+
+- third_party_scripts
+  Scripts or command blocks for fetching external dependencies,
+  including error handling, retries, and fallback logic.
+
+- templates
+  Grouped templates for command blocks, modules, and scripts intended
+  for userAI use. Some presets included, others added intentionally.
+
+- install
+  Command block or module script executed by OBW to generate the working
+  environment.
+
+4. INSTALLATION PROCESS (OBW)
+OBW
+- opens the OPB .hdf5 dataset
+- locates and executes install
+- generates CBOR working copies
+- generates YAML configs as needed
+- initializes JSON lineage files
+- runs third-party dependency scripts
+- registers the program with OASM
+- sets up runtime directories
+
+5. OPTIONAL COMMON BUNDLES
+OBW can install common OPBs
+- compilers
+- CAD modules
+- scripting packs
+- automation libraries
+- geometry libraries
+- agentic modules
+- template packs
+
+The list is curated and grows over time.
+
+6. ALTERNATIVE INSTALL METHODS
+- terminal  oasm install bundle.hdf5
+- install link .oasm-install file that triggers OBW and references an OPB
+
+7. DATA LIFECYCLE (ODLS CORE)
+All OASM-compatible programs follow the four-format hierarchy
+- HDF5 → canonical, immutable source
+- CBOR → runtime working copy
+- YAML → human-readable, editable interface
+- JSON → lineage and revert ledger
+
+8. RUNTIME LINEAGE
+- Every session has a unique session ID.
+- Lineage events are stored as JSON.
+- JSON lineage can be compiled into CBOR for replay.
+
+9. PUBLICATION
+When work is finalized
+- CBOR runtime state is compiled into a new HDF5 artifact.
+- Artifact includes lineage, session IDs, schema version, program version.
+- This artifact is immutable and reproducible.
+
+10. PROGRAM FLEXIBILITY
+Programs may define their own
+- YAML variables and configs
+- CBOR runtime schemas
+- lineage event types
+- publication metadata
+
+But must remain compliant with ODLS.
+============================================================

@@ -1,0 +1,89 @@
+============================================================
+LINEAGE-AWARE ENHANCEMENT AND REVERT MODEL
+============================================================
+
+1. CHECKPOINT BEFORE CHANGE
+------------------------------------------------------------
+Before any enhancement/refinement attempt (by user, AI, program, Py03, Rust):
+
+- snapshot live CBOR state
+- compute checksums
+- record a JSON lineage checkpoint with:
+  - timestamp
+  - session ID
+  - module/command/template ID
+  - change intent
+  - old values
+
+This defines a clear revert target.
+
+------------------------------------------------------------
+
+2. ENHANCEMENT IN AN ISOLATED CBOR COPY
+------------------------------------------------------------
+Enhancement is applied to:
+- a temporary CBOR working copy
+
+Not applied directly to:
+- immutable templates
+- previously saved mutable instances
+- staged configurations
+
+This working copy is:
+- sandboxed
+- schema-validated
+- lineage-aware
+
+------------------------------------------------------------
+
+3. FULL-STACK VALIDATION
+------------------------------------------------------------
+Validation involves:
+- Py03 pattern tests (cycle detection, state validity, fuzzing)
+- Rust execution checks (performance, concurrency, scheduling)
+- Shell pipeline checks (PS-Insider behavior, environment correctness)
+- schema validation (CBOR/YAML/JSON/HDF5 rules)
+- domain-specific validation (compile, calculate, geometry, etc.)
+
+If validation passes:
+- enhancement is accepted
+If validation fails:
+- enhancement is rejected
+
+------------------------------------------------------------
+
+4. ACCEPTED ENHANCEMENT
+------------------------------------------------------------
+If accepted:
+- temporary CBOR becomes the new mutable instance
+- JSON lineage is updated with "success" status
+- YAML reflection is regenerated from the new CBOR state
+- checksums are updated
+- optional: staged compositions are updated
+
+Immutable templates remain untouched.
+
+------------------------------------------------------------
+
+5. FAILED ENHANCEMENT (REVERT)
+------------------------------------------------------------
+If validation fails or runtime crashes:
+- temporary CBOR copy is discarded
+- system loads last known good checkpoint
+- YAML reflection is regenerated from that checkpoint
+- JSON lineage records the failure and revert
+- runtime resumes from a valid state
+
+No invalid states persist. Immutable templates remain intact.
+
+============================================================
+SUMMARY
+------------------------------------------------------------
+Every enhancement is:
+- checkpointed
+- tested in isolation
+- validated
+- either accepted as a new mutable state
+  or reverted to a known good state
+
+Lineage and safety are first-class behavior.
