@@ -1,0 +1,129 @@
+============================================================
+OASM-SIDE SCHEMAS (IN DEPTH)
+============================================================
+
+Purpose:
+Define universal types, structures, and validation rules that all OASM-compatible
+programs and bundles must follow.
+
+1. UNIVERSAL TYPES
+- primitive types (int, float, string, bool)
+- vectors/matrices
+- geometry primitives
+- module metadata
+- lineage metadata
+- task/job descriptors
+
+2. UNIVERSAL STRUCTURES
+- module definitions
+- command block structures
+- runtime state containers
+- lineage event formats
+- session descriptors
+- configuration objects (for YAML/CBOR)
+
+3. VALIDATION RULES
+- required fields
+- type constraints
+- allowed ranges
+- structural invariants
+- dependency rules
+- version compatibility rules
+
+4. LIFECYCLE MAPPINGS
+- HDF5 → CBOR (canonical to runtime)
+- CBOR → YAML (runtime to human-readable)
+- YAML → CBOR (human edits back to runtime)
+- CBOR → JSON (runtime to lineage)
+- JSON → CBOR (lineage replay)
+
+5. SESSION IDENTIFIERS
+- UUID formats
+- timestamp rules
+- program ID linkage
+- user/AI/source tags
+
+6. ERROR/RECOVERY SCHEMAS
+- validation error records
+- revert events
+- crash recovery info
+- debug bundles
+
+
+============================================================
+PROGRAM-SIDE SCHEMAS — EXAMPLE: OBJEX
+============================================================
+
+Objex extends OASM schemas with domain-specific rules.
+
+1. OBJEX TYPES
+- geometry datasets
+- animation equations
+- command block definitions
+- automation parameters
+- ceremonial lineage attributes
+
+2. OBJEX STRUCTURES
+- geometry kernel state containers
+- animation timeline objects
+- module orchestration graphs
+- user/AI discussion metadata structures
+- adaptive logging definitions
+
+3. OBJEX VALIDATION
+- geometry validity checks (no invalid topology)
+- animation equation solvability
+- module dependency resolution
+- ceremonial lineage integrity
+- adaptive logging thresholds and filters
+
+4. OBJEX LIFECYCLE MAPPINGS
+- HDF5 geometry → CBOR runtime geometry
+- YAML animation configs → CBOR animation state
+- JSON lineage → CBOR replay state
+- CBOR runtime → HDF5 published artifact
+
+5. OBJEX SESSION IDENTIFIERS
+- geometry session IDs
+- animation session IDs
+- module execution IDs
+- ceremonial lineage IDs
+
+
+============================================================
+BLANK PROGRAM-SIDE TEMPLATE
+============================================================
+
+PROGRAM NAME: _______________________________
+
+1. PROGRAM-SPECIFIC TYPES
+_____________________________________________
+_____________________________________________
+
+2. PROGRAM-SPECIFIC STRUCTURES
+_____________________________________________
+_____________________________________________
+
+3. PROGRAM-SPECIFIC VALIDATION RULES
+_____________________________________________
+_____________________________________________
+
+4. PROGRAM LIFECYCLE MAPPINGS
+
+HDF5 → CBOR:
+_____________________________________________
+
+YAML → CBOR:
+_____________________________________________
+
+JSON → CBOR:
+_____________________________________________
+
+CBOR → HDF5:
+_____________________________________________
+
+5. PROGRAM SESSION IDENTIFIERS
+_____________________________________________
+_____________________________________________
+
+============================================================

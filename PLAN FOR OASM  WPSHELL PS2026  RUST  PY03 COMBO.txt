@@ -1,0 +1,203 @@
+============================================================
+PLAN: OASM — PS-INSIDER HARDENED + RUST + PY03
+============================================================
+
+GOAL
+------------------------------------------------------------
+- Target a hardened PowerShell Insider runtime (PS-Insider) with no WPShell dependency; minimal, constrained modular core.
+- Put Rust in charge as the primary orchestrator.
+- Use Py03 as the pattern-testing and refinement engine.
+- Integrate OASM-compiled templates for modules, crates, scripts, and command blocks produced by the OASM compiler module.
+- Reintroduce only necessary Windows behaviors for compatibility,
+  with Rust mediating and logging all hierarchy of command/control.
+
+PHASE 1 — HARDEN MINIMAL POWERSHELL INSIDER RUNTIME
+------------------------------------------------------------
+1. Define constrained PS-Insider runtime responsibilities:
+   - constrained language mode and script policy enforcement (AMSI/WDAC)
+   - minimal prompt/display and safe input handling
+   - basic command tokenization limited to signed templates
+   - handing off CBOR command representations to the Rust orchestrator
+
+2. Harden runtime capabilities:
+   - enforce signed modules and OPBs only
+   - prevent direct unmanaged WinAPI access from scripts
+   - integrate AppContainer/Job objects and Credential Guard where applicable
+   - enforce least privilege and role-based execution
+
+3. Remove from runtime:
+   - Remove any WPShell dependencies and legacy hooks
+   - heavy built-in modules not required for hardened operation
+   - any direct unmanaged calls that should be funneled through Rust wrappers
+
+4. Represent shell behaviors as immutable templates in HDF5:
+   - /core/ps_insider/templates
+
+Each template:
+   - <100 LOC where possible
+   - isolated, signed behavior (parse, display error, run pipeline step, etc.)
+   - associated tests, signature, and logging rules.
+
+PHASE 2 — ELEVATE RUST AS ORCHESTRATOR
+------------------------------------------------------------
+1. Rust becomes the central controller for:
+   - command dispatch
+   - pipeline execution
+   - module/crate invocation
+   - job/task scheduling for OASM actions
+   - access to HDF5 and CBOR
+
+2. All shell commands are modeled as data:
+   - shell parses just enough to build a data structure
+   - Rust orchestrator receives a CBOR command representation
+   - Rust decides:
+     - which module to invoke
+     - which template to use
+     - how to schedule the work
+     - how to log it
+
+3. Rust owns:
+   - checksums and validation gates
+   - interaction with OASM Program Bundles (OPB)
+   - enforcement of ODLS rules:
+     - always work with copies
+     - create lineage checkpoints
+     - validate and revert when needed
+
+4. HDF5 for orchestration:
+   - /core/rust/schemas describe command/job structures
+   - /core/cbor_layouts define runtime formats
+   - /core/staging holds known-good orchestrator profiles.
+
+PHASE 3 — WEAVE PY03 FOR PATTERN TESTING AND REFINEMENT
+------------------------------------------------------------
+1. Py03 is integrated via /core/py03:
+   - given access to:
+     - CBOR runtime states
+     - YAML reflections
+     - JSON lineage
+     - logging data
+
+2. Py03 roles:
+   - pattern detection (cycles, deadlocks, infinite loops)
+   - stress testing modules and templates
+   - fuzzing inputs for shells, Rust modules, and OASM kits
+   - generating diagnostic reports and suggested refinements
+
+3. Rust and Py03 interaction:
+   - Rust executes workloads and enforces constraints.
+   - Py03 observes patterns, evaluates behavior, and flags anomalies.
+   - Rust can mark modules/templates as:
+     - stable
+     - experimental
+     - quarantined
+
+4. All refinement attempts:
+   - run under the lineage-aware enhancement model
+   - can be reverted if they degrade stability.
+
+PHASE 4 — TEMPLATE SYSTEM FOR MODULES, CRATES, SCRIPTS, COMMAND BLOCKS
+------------------------------------------------------------
+1. Define unified templates in HDF5:
+/core/templates
+  /shell
+  /rust
+  /py
+  /oasm_modules
+  /jobs
+  /pipelines
+
+2. Each template:
+   - has CBOR + YAML representation
+   - is immutable
+   - has attached schemas, logging, and tests
+   - can be staged into larger assemblies in /core/staging
+
+3. Objex integration:
+   - treat Objex as a major OASM module with its own:
+     - /modules/objex
+     - /schemas/objex
+     - /templates/objex
+     - /tests/objex
+   - all Objex modules and kits must:
+     - conform to ODLS
+     - use the template system
+     - support lineage-aware enhancement and revert
+     - be orchestrated by Rust
+     - be testable by Py03
+
+PHASE 5 — LAYER WINDOWS CAPABILITIES BACK SAFELY
+------------------------------------------------------------
+1. Identify what is truly needed from "normal Windows":
+   - filesystem access
+   - process launching
+   - network access (if allowed)
+   - registry where necessary
+   - security/credential interfaces
+
+2. Wrap these behaviors:
+   - Rust provides safe wrappers
+   - wrappers are defined as HDF5 templates:
+     - /core/rust/templates/windows_bridge
+   - shell or scripts never call Windows APIs directly,
+     only via Rust-managed interfaces.
+
+3. All Windows-facing actions:
+   - go through:
+     - Rust orchestrator
+     - CBOR command structures
+     - logging/lineage tracking
+   - are subject to:
+     - validation
+     - checksums
+     - security policies
+
+4. Third-party compatibility and security:
+   - third-party tools are integrated as OPBs:
+     - /kits/<third_party_name>
+   - installers and scripts for them:
+     - live in /third_party_scripts
+   - OBW and Rust orchestrator manage:
+     - installation
+     - configuration
+     - controlled invocation.
+
+PHASE 6 — SELF-REPAIRABLE, AUDITABLE, FIXABLE STACK
+------------------------------------------------------------
+1. Every base unit, template, and staged assembly:
+   - has tests in /core/tests
+   - has logging rules in /core/logging
+   - has lineage in /core/lineage
+   - has checksums for integrity
+
+2. Self-repair flow:
+   - detection (Rust + Py03 + logs)
+   - verification (checksums, tests)
+   - rollback (use known-good staging config)
+   - optional re-refinement via Py03
+
+3. For OASM + PS-Insider Hardened + Rust + Py03:
+   - the entire combo is:
+     - modular (small pieces, templates, kits)
+     - orchestrated (Rust)
+     - refined and tested (Py03)
+     - shell-accessible in a controlled way
+     - Windows-compatible where required
+     - always auditable and revertible.
+
+============================================================
+END STATE
+------------------------------------------------------------
+We end with:
+- a hardened, minimal PowerShell Insider runtime (PS-Insider)
+- a Rust-driven orchestration layer that owns:
+  - modules, crates, scripts, command blocks
+- a Py03 refinement engine that:
+  - stress-tests
+  - detects patterns
+  - drives stability improvements
+- a template and staging system in HDF5 that:
+  - makes everything repairable, auditable, reproducible
+- Windows capabilities layered back under Rust control,
+  in line with OASM safety and lineage policies.
+============================================================

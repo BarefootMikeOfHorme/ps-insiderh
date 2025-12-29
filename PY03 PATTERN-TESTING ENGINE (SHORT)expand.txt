@@ -1,0 +1,55 @@
+============================================================
+PY03 PATTERN-TESTING AND REFINEMENT ENGINE
+============================================================
+
+ROLE
+------------------------------------------------------------
+Py03 acts as:
+- pattern tester
+- cycle detector
+- refinement engine
+- validation orchestrator
+
+OPERATIONS
+------------------------------------------------------------
+For each command block, module, dataset, or template:
+
+1. Load live CBOR copy (never immutable template).
+2. Run pattern tests:
+   - detect cycles
+   - detect invalid states
+   - detect infinite loops
+   - fuzz inputs
+   - stress-test paths
+
+3. Invoke Rust orchestrator for:
+   - real execution
+   - performance checks
+   - threading/scheduling checks
+
+4. Interact with shell (PS-Insider) to:
+   - simulate pipelines
+   - validate environment usage
+
+5. Log all results to JSON lineage:
+   - success/fail
+   - performance
+   - stability
+   - anomaly patterns
+
+6. If stable:
+   - mark as refined
+   - optionally update staged configurations
+If unstable:
+   - revert to known-good
+   - record failure for future avoidance.
+
+============================================================
+RESULT
+------------------------------------------------------------
+Commands, datasets, and templates are driven into a
+super-refined state:
+- stable
+- cycle-free
+- auditable
+- reproducible
