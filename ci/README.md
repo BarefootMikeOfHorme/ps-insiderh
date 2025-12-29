@@ -22,3 +22,20 @@ This folder contains CI job stubs for PS-Insider security checks. Implement the 
 
 5) Integration with reporting
    - On CI failures, collect logs and append to HDF5 audit logs or store artifacts for triage
+
+
+Implemented scripts (initial):
+- `ci/wdac_validate.ps1` — WDAC policy structural validator (Windows runner)
+- `ci/verify_signatures.sh` — signature verification for OPB/HDF5 artifacts (GPG/OpenSSL best-effort)
+- `ci/static_scan.sh` — grep-based static scan for direct WinAPI/unsafe patterns (fails on matches)
+- `tests/test_fuzz.py` — Hypothesis-based fuzz test for CBOR parsing
+- `ci/requirements.txt` — Python dependencies for fuzzing/coverage
+
+Workflow changes:
+- `.github/workflows/ps_insider_security_checks.yml` now runs the above scripts.
+
+Notes & Next improvements:
+- WDAC validation is best-effort in CI: it verifies presence and XML structure and will attempt signature checks if certutil available. For full enforcement tests, we recommend an on-host validation step with a signed policy and a restricted test VM.
+- Signature verification assumes GPG-signed artifacts or CMS signatures; add signer cert import and trust chain verification as needed.
+- Py03 fuzzing uses Hypothesis to drive CBOR parsing; expand tests to use project-specific parsers and templates for deeper coverage.
+- Static scan uses heuristic grep patterns; consider integrating a more expressive analyzer (semgrep or custom AST checks) for fewer false positives.

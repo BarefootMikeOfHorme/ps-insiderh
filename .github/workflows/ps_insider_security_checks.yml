@@ -16,10 +16,9 @@ jobs:
       - name: Setup PowerShell
         uses: actions/setup-powershell@v2
 
-      - name: Run WDAC policy validation (stub)
+      - name: Run WDAC policy validation
         run: |
-          Write-Host "Running WDAC validation stub"
-          # Replace with script to validate WDAC policy (e.g., test signing policy against test workload)
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./ci/wdac_validate.ps1
 
   signature_verification:
     runs-on: ubuntu-latest
@@ -27,14 +26,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install verification tools (stub)
+      - name: Install GPG
         run: |
-          echo "Installing signature verification tools"
+          sudo apt-get update && sudo apt-get install -y gnupg
 
-      - name: Verify OPB/template signatures (stub)
+      - name: Verify OPB/template signatures
         run: |
-          echo "Run signature verification over /core/staging artifacts"
-          # Implement script: find OPB/HDF5 artifacts, verify signatures and reproducible hashes
+          chmod +x ./ci/verify_signatures.sh
+          ./ci/verify_signatures.sh
 
   py03_fuzzing:
     runs-on: ubuntu-latest
@@ -47,8 +46,38 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Run Py03 fuzzing (stub)
+      - name: Install Python requirements
         run: |
-          python -m pip install -r requirements.txt || true
-          echo "Run Py03-based fuzzing harness and report coverage/critical failures"
-          # Integrate with hypothesis/fuzzing harness and fail on critical crashes or low coverage
+          python -m pip install --upgrade pip
+          python -m pip install -r ci/requirements.txt
+
+      - name: Run Py03 fuzzing and coverage
+        run: |
+          pytest --maxfail=1 --disable-warnings -q --cov=.
+
+  static_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run static scan for WinAPI patterns
+        run: |
+          chmod +x ./ci/static_scan.sh
+          ./ci/static_scan.sh
+
+  upload_artifacts:
+    runs-on: ubuntu-latest
+    needs: [signature_verification, py03_fuzzing, static_scan]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps-insider-ci-artifacts
+          path: |
+            ./ci/**
+            ./tests/**
+            ./coverage.xml
